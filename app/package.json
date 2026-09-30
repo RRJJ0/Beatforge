@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "tauri": "tauri",
     "dev": "vite",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
@@ -16,6 +17,8 @@
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.12.0",
+    "@tauri-apps/plugin-dialog": "^2.8.0",
     "@vicons/ionicons5": "^0.13.0",
     "naive-ui": "^2.45.3",
     "pinia": "^4.0.3",
@@ -23,6 +26,7 @@
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.0",
     "@tsconfig/node24": "^24.0.5",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^24.13.4",

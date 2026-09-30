@@ -8,4 +8,3 @@ export const useAppStore = defineStore('app', () => {
   }
   return { isDark, toggleTheme }
 })
-

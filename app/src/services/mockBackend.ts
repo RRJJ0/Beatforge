@@ -21,6 +21,11 @@ export function simulateProgress(
 
 export async function mockEnvironmentCheck() {
   await new Promise((resolve) => window.setTimeout(resolve, 650))
-  return { python: '3.11.9', mapperatorinator: 'ready', pytorch: '2.5', cuda: '12.4', gpu: 'RTX 4070' }
+  return {
+    python: '3.11.9',
+    mapperatorinator: 'ready',
+    pytorch: '2.5',
+    cuda: '12.4',
+    gpu: 'RTX 4070',
+  }
 }
-
