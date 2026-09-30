@@ -1,0 +1,30 @@
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { useJobsStore } from '../jobs'
+
+describe('jobs store', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setActivePinia(createPinia())
+  })
+
+  it('adds and persists a generation job', () => {
+    const store = useJobsStore()
+    const initialCount = store.jobs.length
+    store.addJob({
+      title: 'Test Track', artist: 'Test Artist', audioFile: 'track.mp3',
+      model: 'Mapperatorinator Standard', difficulty: 4.5,
+    })
+    expect(store.jobs).toHaveLength(initialCount + 1)
+    expect(store.jobs[0]?.status).toBe('queued')
+    expect(localStorage.getItem('beatforge:jobs')).toContain('Test Track')
+  })
+
+  it('removes a job by id', () => {
+    const store = useJobsStore()
+    const id = store.jobs[0]!.id
+    store.removeJob(id)
+    expect(store.jobs.some((job) => job.id === id)).toBe(false)
+  })
+})
+
