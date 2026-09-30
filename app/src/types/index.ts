@@ -1,4 +1,4 @@
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 export interface GenerationJob {
   id: string
   title: string
@@ -9,8 +9,20 @@ export interface GenerationJob {
   status: JobStatus
   progress: number
   stage: string
+  scenario: string
   createdAt: string
   eta?: string
+  errorMessage?: string
+  outputPath?: string
+}
+
+export interface StartJobInput {
+  title: string
+  artist: string
+  audioFile: string
+  model: string
+  difficulty: number
+  scenario: string
 }
 export interface ModelPackage {
   id: string

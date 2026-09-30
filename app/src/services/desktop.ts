@@ -1,6 +1,14 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { AppPaths, AppSettings, OsuInstallation, SystemInfo } from '@/types'
+import type {
+  AppPaths,
+  AppSettings,
+  GenerationJob,
+  OsuInstallation,
+  StartJobInput,
+  SystemInfo,
+} from '@/types'
 
 export function isDesktopRuntime() {
   return '__TAURI_INTERNALS__' in window
@@ -40,4 +48,28 @@ export async function loadDesktopSettings() {
 
 export async function saveDesktopSettings(settings: AppSettings) {
   return invoke<void>('save_settings', { settings })
+}
+
+export async function createDesktopJob(input: StartJobInput) {
+  return invoke<GenerationJob>('create_job', { input })
+}
+
+export async function listDesktopJobs() {
+  return invoke<GenerationJob[]>('list_jobs')
+}
+
+export async function cancelDesktopJob(jobId: string) {
+  return invoke<void>('cancel_job', { jobId })
+}
+
+export async function retryDesktopJob(jobId: string) {
+  return invoke<void>('retry_job', { jobId })
+}
+
+export async function deleteDesktopJob(jobId: string) {
+  return invoke<void>('delete_job', { jobId })
+}
+
+export function onDesktopJobEvent(handler: (job: GenerationJob) => void): Promise<UnlistenFn> {
+  return listen<GenerationJob>('job-event', (event) => handler(event.payload))
 }

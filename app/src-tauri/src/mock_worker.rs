@@ -1,0 +1,133 @@
+use crate::protocol::{MAX_MESSAGE_BYTES, PROTOCOL_VERSION, WorkerEvent, WorkerStartCommand};
+use std::{
+    fs,
+    io::{self, BufRead, Write},
+    path::Path,
+    thread,
+    time::Duration,
+};
+
+fn send(event: &WorkerEvent) -> Result<(), String> {
+    let json = serde_json::to_string(event).map_err(|error| error.to_string())?;
+    let mut stdout = io::stdout().lock();
+    writeln!(stdout, "{json}").map_err(|error| error.to_string())?;
+    stdout.flush().map_err(|error| error.to_string())
+}
+
+fn progress(
+    command: &WorkerStartCommand,
+    stage: &str,
+    percent: u8,
+    message: &str,
+) -> Result<(), String> {
+    send(&WorkerEvent::Progress {
+        protocol_version: PROTOCOL_VERSION,
+        job_id: command.job_id.clone(),
+        stage: stage.into(),
+        percent,
+        message: message.into(),
+    })
+}
+
+pub fn run() -> i32 {
+    let mut line = String::new();
+    if io::stdin().lock().read_line(&mut line).is_err() {
+        eprintln!("Failed to read start command");
+        return 2;
+    }
+    if line.len() > MAX_MESSAGE_BYTES {
+        eprintln!("Start command exceeds {MAX_MESSAGE_BYTES} bytes");
+        return 2;
+    }
+    let command: WorkerStartCommand = match serde_json::from_str(&line) {
+        Ok(command) => command,
+        Err(error) => {
+            eprintln!("Invalid start command: {error}");
+            return 2;
+        }
+    };
+    if command.protocol_version != PROTOCOL_VERSION || command.message_type != "start_job" {
+        eprintln!("Unsupported worker command");
+        return 2;
+    }
+
+    eprintln!("mock worker started for {}", command.job_id);
+    if command.scenario == "crash" {
+        eprintln!("simulating unexpected worker exit");
+        return 7;
+    }
+    if command.scenario == "malformed" {
+        println!("{{this-is-not-json");
+        return 0;
+    }
+
+    let stages = [
+        ("preparing", 8, "Preparing audio"),
+        ("analyzing", 24, "Analyzing rhythm and timing"),
+        ("loading_model", 39, "Loading mock model"),
+        ("generating", 62, "Generating hit objects"),
+        ("post_processing", 84, "Post-processing patterns"),
+        ("packaging", 96, "Validating and packaging result"),
+    ];
+    for (index, (stage, percent, message)) in stages.iter().enumerate() {
+        if let Err(error) = progress(&command, stage, *percent, message) {
+            eprintln!("Failed to emit progress: {error}");
+            return 3;
+        }
+        if command.scenario == "hang" && index == 1 {
+            eprintln!("simulating a stalled worker");
+            thread::sleep(Duration::from_secs(30));
+            return 0;
+        }
+        thread::sleep(Duration::from_millis(450));
+    }
+
+    if matches!(command.scenario.as_str(), "failure" | "oom") {
+        let (code, message) = if command.scenario == "oom" {
+            (
+                "CUDA_OUT_OF_MEMORY",
+                "GPU memory is insufficient for this job",
+            )
+        } else {
+            (
+                "MOCK_GENERATION_FAILED",
+                "The mock worker was instructed to fail",
+            )
+        };
+        let _ = send(&WorkerEvent::Failed {
+            protocol_version: PROTOCOL_VERSION,
+            job_id: command.job_id,
+            code: code.into(),
+            message: message.into(),
+            recoverable: true,
+        });
+        return 4;
+    }
+
+    let output_directory = Path::new(&command.output_path);
+    if let Err(error) = fs::create_dir_all(output_directory) {
+        eprintln!("Failed to create output directory: {error}");
+        return 5;
+    }
+    let result_path = output_directory.join("mock-result.json");
+    let result = serde_json::json!({
+        "protocol_version": PROTOCOL_VERSION,
+        "job_id": command.job_id,
+        "title": command.title,
+        "artist": command.artist,
+        "model": command.model,
+        "difficulty": command.difficulty,
+        "notice": "Mock output only; no beatmap was generated"
+    });
+    if let Err(error) = fs::write(&result_path, result.to_string()) {
+        eprintln!("Failed to write mock result: {error}");
+        return 5;
+    }
+    let _ = send(&WorkerEvent::Completed {
+        protocol_version: PROTOCOL_VERSION,
+        job_id: command.job_id,
+        output_path: result_path.to_string_lossy().into_owned(),
+        warnings: vec!["Mock worker output; not a playable beatmap".into()],
+    });
+    0
+}

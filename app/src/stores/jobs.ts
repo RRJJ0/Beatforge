@@ -1,112 +1,171 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { GenerationJob } from '@/types'
-import { simulateProgress } from '@/services/mockBackend'
+import type { GenerationJob, StartJobInput } from '@/types'
+import { simulateProgress, type MockTask } from '@/services/mockBackend'
+import {
+  cancelDesktopJob,
+  createDesktopJob,
+  deleteDesktopJob,
+  isDesktopRuntime,
+  listDesktopJobs,
+  onDesktopJobEvent,
+  retryDesktopJob,
+} from '@/services/desktop'
+
+const seedJobs: GenerationJob[] = [
+  {
+    id: 'BF-DEMO-1',
+    title: 'Daybreak',
+    artist: 'Mizuki',
+    audioFile: 'daybreak.flac',
+    model: 'Mapperatorinator Standard',
+    difficulty: 5.8,
+    status: 'completed',
+    progress: 100,
+    stage: 'Browser prototype result',
+    scenario: 'success',
+    createdAt: 'Demo data',
+  },
+]
 
 export const useJobsStore = defineStore('jobs', () => {
-  const seedJobs: GenerationJob[] = [
-    {
-      id: 'BF-0241',
-      title: 'Starlight Memory',
-      artist: 'Lunaria',
-      audioFile: 'starlight-memory.mp3',
-      model: 'Mapperatorinator Standard',
-      difficulty: 5.2,
-      status: 'running',
-      progress: 64,
-      stage: 'Placing hit objects',
-      createdAt: 'Today, 14:22',
-      eta: '02:18',
-    },
-    {
-      id: 'BF-0240',
-      title: 'Neon Rain',
-      artist: 'Asterism',
-      audioFile: 'neon-rain.wav',
-      model: 'Mapperatorinator Standard',
-      difficulty: 4.4,
-      status: 'queued',
-      progress: 0,
-      stage: 'Waiting for GPU',
-      createdAt: 'Today, 14:19',
-    },
-    {
-      id: 'BF-0239',
-      title: 'Daybreak',
-      artist: 'Mizuki',
-      audioFile: 'daybreak.flac',
-      model: 'Mapperatorinator Standard',
-      difficulty: 5.8,
-      status: 'completed',
-      progress: 100,
-      stage: 'Exported',
-      createdAt: 'Today, 13:48',
-    },
-    {
-      id: 'BF-0238',
-      title: 'Broken Signal',
-      artist: 'Unknown',
-      audioFile: 'broken-signal.mp3',
-      model: 'Mapperatorinator Standard',
-      difficulty: 4.0,
-      status: 'failed',
-      progress: 18,
-      stage: 'Audio decoding failed · Try converting the file to WAV.',
-      createdAt: 'Today, 12:51',
-    },
-  ]
-  const saved = localStorage.getItem('beatforge:jobs')
-  const jobs = ref<GenerationJob[]>(saved ? JSON.parse(saved) : seedJobs)
+  const desktop = isDesktopRuntime()
+  const saved = desktop ? null : localStorage.getItem('beatforge:jobs')
+  const jobs = ref<GenerationJob[]>(saved ? JSON.parse(saved) : desktop ? [] : seedJobs)
+  const initialized = ref(false)
+  const error = ref('')
+  const mockTasks = new Map<string, MockTask>()
+
   const activeCount = computed(
     () => jobs.value.filter((job) => ['running', 'queued'].includes(job.status)).length,
   )
   const completedJobs = computed(() => jobs.value.filter((job) => job.status === 'completed'))
-  function addJob(
-    input: Pick<GenerationJob, 'title' | 'artist' | 'audioFile' | 'model' | 'difficulty'>,
-  ) {
-    jobs.value.unshift({
+  const completedToday = computed(() => completedJobs.value.length)
+
+  function upsert(job: GenerationJob) {
+    const index = jobs.value.findIndex((item) => item.id === job.id)
+    if (index === -1) jobs.value.unshift(job)
+    else jobs.value[index] = job
+  }
+
+  async function initialize() {
+    if (initialized.value) return
+    initialized.value = true
+    if (!desktop) return
+    try {
+      await onDesktopJobEvent(upsert)
+      jobs.value = await listDesktopJobs()
+    } catch (reason) {
+      error.value = reason instanceof Error ? reason.message : String(reason)
+    }
+  }
+
+  function persistBrowserJobs() {
+    if (!desktop) localStorage.setItem('beatforge:jobs', JSON.stringify(jobs.value))
+  }
+
+  function addJob(input: StartJobInput): GenerationJob {
+    const job: GenerationJob = {
       ...input,
-      id: `BF-${String(242 + jobs.value.length).padStart(4, '0')}`,
+      id: `BF-DEMO-${Date.now()}`,
       status: 'queued',
       progress: 0,
-      stage: 'Preparing audio',
+      stage: 'Waiting for browser mock',
       createdAt: 'Just now',
-    })
-    persist()
+    }
+    jobs.value.unshift(job)
+    persistBrowserJobs()
+    return job
   }
-  function removeJob(id: string) {
-    jobs.value = jobs.value.filter((job) => job.id !== id)
-    persist()
+
+  async function createJob(input: StartJobInput) {
+    if (desktop) {
+      const job = await createDesktopJob(input)
+      upsert(job)
+      return job
+    }
+    const job = addJob(input)
+    startBrowserJob(job.id)
+    return job
   }
-  function persist() {
-    localStorage.setItem('beatforge:jobs', JSON.stringify(jobs.value))
-  }
-  function startJob(id: string) {
+
+  function startBrowserJob(id: string) {
     const job = jobs.value.find((item) => item.id === id)
     if (!job) return
     job.status = 'running'
-    job.stage = 'Analyzing audio'
+    job.stage = 'Browser mock progress'
     job.progress = 0
-    persist()
-    simulateProgress(
-      (progress) => {
-        job.progress = progress
-        job.stage =
-          progress < 30
-            ? 'Analyzing audio'
-            : progress < 75
-              ? 'Placing hit objects'
-              : 'Validating beatmap'
-        persist()
-      },
-      () => {
-        job.status = 'completed'
-        job.stage = 'Exported'
-        job.progress = 100
-        persist()
-      },
-      300,
+    mockTasks.get(id)?.cancel()
+    mockTasks.set(
+      id,
+      simulateProgress(
+        (progress) => {
+          job.progress = progress
+          job.stage = progress < 75 ? 'Browser mock generating' : 'Browser mock packaging'
+          persistBrowserJobs()
+        },
+        () => {
+          job.status = 'completed'
+          job.stage = 'Browser prototype result'
+          job.progress = 100
+          mockTasks.delete(id)
+          persistBrowserJobs()
+        },
+        300,
+      ),
     )
   }
-  return { jobs, activeCount, completedJobs, addJob, removeJob, startJob }
+
+  async function cancelJob(id: string) {
+    if (desktop) {
+      await cancelDesktopJob(id)
+      return
+    }
+    mockTasks.get(id)?.cancel()
+    mockTasks.delete(id)
+    const job = jobs.value.find((item) => item.id === id)
+    if (job) {
+      job.status = 'cancelled'
+      job.stage = 'Cancelled'
+      persistBrowserJobs()
+    }
+  }
+
+  async function retryJob(id: string) {
+    if (desktop) {
+      await retryDesktopJob(id)
+      const job = jobs.value.find((item) => item.id === id)
+      if (job) {
+        job.status = 'queued'
+        job.progress = 0
+        job.stage = 'Waiting for worker'
+        job.errorMessage = undefined
+      }
+      return
+    }
+    startBrowserJob(id)
+  }
+
+  async function removeJob(id: string) {
+    if (desktop) await deleteDesktopJob(id)
+    mockTasks.get(id)?.cancel()
+    mockTasks.delete(id)
+    jobs.value = jobs.value.filter((job) => job.id !== id)
+    persistBrowserJobs()
+  }
+
+  return {
+    jobs,
+    activeCount,
+    completedJobs,
+    completedToday,
+    initialized,
+    error,
+    initialize,
+    addJob,
+    createJob,
+    cancelJob,
+    retryJob,
+    removeJob,
+  }
 })

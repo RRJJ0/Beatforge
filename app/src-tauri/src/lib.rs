@@ -4,9 +4,22 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Manager};
+
+mod jobs;
+mod mock_worker;
+mod protocol;
+mod worker;
+
+static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub fn run_mock_worker() -> i32 {
+    mock_worker::run()
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,7 +100,7 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn build_paths(app: &AppHandle) -> Result<AppPaths, String> {
+pub(crate) fn build_paths(app: &AppHandle) -> Result<AppPaths, String> {
     let root = app
         .path()
         .app_data_dir()
@@ -116,7 +129,7 @@ fn build_paths(app: &AppHandle) -> Result<AppPaths, String> {
     Ok(paths)
 }
 
-fn open_database(app: &AppHandle) -> Result<(Connection, AppPaths), String> {
+pub(crate) fn open_database(app: &AppHandle) -> Result<(Connection, AppPaths), String> {
     let paths = build_paths(app)?;
     let connection = Connection::open(&paths.database).map_err(|error| error.to_string())?;
     connection.execute_batch(
@@ -128,6 +141,7 @@ fn open_database(app: &AppHandle) -> Result<(Connection, AppPaths), String> {
      CREATE TABLE IF NOT EXISTS models (id TEXT PRIMARY KEY, version TEXT NOT NULL, status TEXT NOT NULL, manifest_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
      INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);",
   ).map_err(|error| error.to_string())?;
+    jobs::migrate(&connection)?;
     Ok((connection, paths))
 }
 
@@ -138,20 +152,19 @@ fn detect_gpu() -> GpuInfo {
             "--format=csv,noheader,nounits",
         ])
         .output();
-    if let Ok(output) = output {
-        if output.status.success() {
-            if let Some(line) = String::from_utf8_lossy(&output.stdout).lines().next() {
-                let fields: Vec<&str> = line.split(',').map(str::trim).collect();
-                if fields.len() >= 4 {
-                    return GpuInfo {
-                        name: fields[0].into(),
-                        memory_total_mb: fields[1].parse().ok(),
-                        memory_free_mb: fields[2].parse().ok(),
-                        driver_version: Some(fields[3].into()),
-                        available: true,
-                    };
-                }
-            }
+    if let Ok(output) = output
+        && output.status.success()
+        && let Some(line) = String::from_utf8_lossy(&output.stdout).lines().next()
+    {
+        let fields: Vec<&str> = line.split(',').map(str::trim).collect();
+        if fields.len() >= 4 {
+            return GpuInfo {
+                name: fields[0].into(),
+                memory_total_mb: fields[1].parse().ok(),
+                memory_free_mb: fields[2].parse().ok(),
+                driver_version: Some(fields[3].into()),
+                available: true,
+            };
         }
     }
     GpuInfo {
@@ -253,12 +266,104 @@ fn save_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     Ok(())
 }
 
+fn next_job_id() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let sequence = JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("BF-{timestamp}-{sequence}")
+}
+
+fn validate_job_input(input: &protocol::StartJobInput) -> Result<(), String> {
+    if input.title.trim().is_empty() || input.title.len() > 200 {
+        return Err("Title must contain between 1 and 200 characters".into());
+    }
+    if input.artist.trim().is_empty() || input.artist.len() > 200 {
+        return Err("Artist must contain between 1 and 200 characters".into());
+    }
+    if !(1.0..=8.0).contains(&input.difficulty) {
+        return Err("Difficulty must be between 1.0 and 8.0".into());
+    }
+    if input.model.trim().is_empty() || input.model.len() > 200 {
+        return Err("Model must contain between 1 and 200 characters".into());
+    }
+    let audio_path = Path::new(&input.audio_file);
+    if !audio_path.is_file() {
+        return Err("Selected audio file does not exist".into());
+    }
+    let extension = audio_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(extension.as_str(), "mp3" | "wav" | "ogg" | "flac") {
+        return Err("Unsupported audio file type".into());
+    }
+    if !matches!(
+        input.scenario.as_str(),
+        "success" | "failure" | "oom" | "hang" | "crash" | "malformed"
+    ) {
+        return Err("Unknown mock worker scenario".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn create_job(
+    app: AppHandle,
+    manager: tauri::State<'_, worker::WorkerManager>,
+    input: protocol::StartJobInput,
+) -> Result<jobs::JobRecord, String> {
+    validate_job_input(&input)?;
+    let id = next_job_id();
+    let (connection, _) = open_database(&app)?;
+    let record = jobs::insert(&connection, &id, &input)?;
+    manager.enqueue(id, input)?;
+    Ok(record)
+}
+
+#[tauri::command]
+fn list_jobs(app: AppHandle) -> Result<Vec<jobs::JobRecord>, String> {
+    let (connection, _) = open_database(&app)?;
+    jobs::list(&connection)
+}
+
+#[tauri::command]
+fn cancel_job(
+    manager: tauri::State<'_, worker::WorkerManager>,
+    job_id: String,
+) -> Result<(), String> {
+    manager.cancel(job_id)
+}
+
+#[tauri::command]
+fn retry_job(
+    app: AppHandle,
+    manager: tauri::State<'_, worker::WorkerManager>,
+    job_id: String,
+) -> Result<(), String> {
+    let (connection, _) = open_database(&app)?;
+    let input =
+        jobs::get_input(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    jobs::reset_for_retry(&connection, &job_id)?;
+    manager.enqueue(job_id, input)
+}
+
+#[tauri::command]
+fn delete_job(app: AppHandle, job_id: String) -> Result<(), String> {
+    let (connection, _) = open_database(&app)?;
+    jobs::delete(&connection, &job_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let application = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            open_database(app.handle()).map_err(std::io::Error::other)?;
+            let (connection, _) = open_database(app.handle()).map_err(std::io::Error::other)?;
+            jobs::mark_interrupted(&connection).map_err(std::io::Error::other)?;
+            app.manage(worker::WorkerManager::new(app.handle().clone()));
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -273,8 +378,18 @@ pub fn run() {
             get_system_info,
             detect_osu_installations,
             load_settings,
-            save_settings
+            save_settings,
+            create_job,
+            list_jobs,
+            cancel_job,
+            retry_job,
+            delete_job
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while building Beatforge");
+    application.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            app_handle.state::<worker::WorkerManager>().shutdown();
+        }
+    });
 }

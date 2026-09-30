@@ -25,16 +25,17 @@ describe('jobs store', () => {
       audioFile: 'track.mp3',
       model: 'Mapperatorinator Standard',
       difficulty: 4.5,
+      scenario: 'success',
     })
     expect(store.jobs).toHaveLength(initialCount + 1)
     expect(store.jobs[0]?.status).toBe('queued')
     expect(localStorage.getItem('beatforge:jobs')).toContain('Test Track')
   })
 
-  it('removes a job by id', () => {
+  it('removes a job by id', async () => {
     const store = useJobsStore()
     const id = store.jobs[0]!.id
-    store.removeJob(id)
+    await store.removeJob(id)
     expect(store.jobs.some((job) => job.id === id)).toBe(false)
   })
 })

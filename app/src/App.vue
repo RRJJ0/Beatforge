@@ -28,12 +28,17 @@ import {
 } from '@vicons/ionicons5'
 import { useAppStore } from '@/stores/app'
 import { useDesktopStore } from '@/stores/desktop'
+import { useJobsStore } from '@/stores/jobs'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const desktopStore = useDesktopStore()
-onMounted(() => desktopStore.initialize())
+const jobsStore = useJobsStore()
+onMounted(() => {
+  desktopStore.initialize()
+  jobsStore.initialize()
+})
 const icon = (component: typeof SparklesOutline) => () =>
   h(NIcon, null, { default: () => h(component) })
 const menuOptions: MenuOption[] = [

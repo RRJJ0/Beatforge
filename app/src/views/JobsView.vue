@@ -1,16 +1,29 @@
 <script setup lang="ts">
 import { NButton, NCard, NEmpty, NIcon, NProgress, NTag, useMessage } from 'naive-ui'
-import { CloseOutline, PauseOutline, PlayOutline, TrashOutline } from '@vicons/ionicons5'
+import { CloseOutline, PlayOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
+import { useDesktopStore } from '@/stores/desktop'
 
 const jobsStore = useJobsStore()
+const desktopStore = useDesktopStore()
 const message = useMessage()
 const statusType = {
   running: 'info',
   queued: 'warning',
   completed: 'success',
   failed: 'error',
+  cancelled: 'default',
+  interrupted: 'warning',
 } as const
+
+async function runAction(action: () => Promise<void>, success?: string) {
+  try {
+    await action()
+    if (success) message.success(success)
+  } catch (reason) {
+    message.error(String(reason))
+  }
+}
 </script>
 
 <template>
@@ -18,17 +31,17 @@ const statusType = {
     <div class="stat-card">
       <div class="stat-label">Active jobs</div>
       <div class="stat-value">{{ jobsStore.activeCount }}</div>
-      <div class="stat-note">1 generating · 1 queued</div>
+      <div class="stat-note">Single-worker JSONL queue</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">GPU utilization</div>
-      <div class="stat-value">78%</div>
-      <div class="stat-note">6.8 / 12 GB VRAM</div>
+      <div class="stat-value">{{ desktopStore.system?.gpu.available ? 'Ready' : '—' }}</div>
+      <div class="stat-note">{{ desktopStore.system?.gpu.name ?? 'Checking hardware' }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Completed today</div>
-      <div class="stat-value">4</div>
-      <div class="stat-note">18 beatmaps this week</div>
+      <div class="stat-value">{{ jobsStore.completedToday }}</div>
+      <div class="stat-note">Persisted in SQLite</div>
     </div>
   </div>
 
@@ -38,9 +51,7 @@ const statusType = {
         <h2 class="section-title">Generation queue</h2>
         <p class="section-copy">Jobs run one at a time to keep GPU memory stable.</p>
       </div>
-      <NButton secondary size="small" @click="message.info('Queue paused (prototype)')"
-        ><template #icon><NIcon :component="PauseOutline" /></template>Pause queue</NButton
-      >
+      <NTag size="small" round type="info">Protocol v1</NTag>
     </div>
     <div v-if="jobsStore.jobs.length" class="job-list">
       <article v-for="job in jobsStore.jobs" :key="job.id" class="job-row">
@@ -73,28 +84,38 @@ const statusType = {
             />
           </template>
           <div v-else class="job-stage">{{ job.stage }}</div>
+          <div v-if="job.errorMessage" class="job-error">{{ job.errorMessage }}</div>
+          <div v-if="job.outputPath" class="job-output mono">{{ job.outputPath }}</div>
         </div>
-        <NButton
-          v-if="job.status === 'queued'"
-          secondary
-          circle
-          size="small"
-          aria-label="Start mock job"
-          @click="jobsStore.startJob(job.id)"
-          ><template #icon><NIcon :component="PlayOutline" /></template
-        ></NButton>
-        <NButton
-          v-else
-          quaternary
-          circle
-          size="small"
-          :aria-label="job.status === 'running' ? 'Cancel job' : 'Remove job'"
-          @click="jobsStore.removeJob(job.id)"
-        >
-          <template #icon
-            ><NIcon :component="job.status === 'running' ? CloseOutline : TrashOutline"
-          /></template>
-        </NButton>
+        <div class="job-actions">
+          <NButton
+            v-if="['running', 'queued'].includes(job.status)"
+            quaternary
+            circle
+            size="small"
+            aria-label="Cancel worker"
+            @click="runAction(() => jobsStore.cancelJob(job.id))"
+            ><template #icon><NIcon :component="CloseOutline" /></template
+          ></NButton>
+          <NButton
+            v-if="['failed', 'cancelled', 'interrupted'].includes(job.status)"
+            secondary
+            circle
+            size="small"
+            aria-label="Retry worker"
+            @click="runAction(() => jobsStore.retryJob(job.id), 'Job queued again')"
+            ><template #icon><NIcon :component="RefreshOutline" /></template
+          ></NButton>
+          <NButton
+            v-if="!['running', 'queued'].includes(job.status)"
+            quaternary
+            circle
+            size="small"
+            aria-label="Remove job"
+            @click="runAction(() => jobsStore.removeJob(job.id))"
+            ><template #icon><NIcon :component="TrashOutline" /></template
+          ></NButton>
+        </div>
       </article>
     </div>
     <NEmpty v-else description="No jobs in the queue" />
@@ -165,5 +186,22 @@ const statusType = {
   margin-top: 12px;
   color: #858da0;
   font-size: 10px;
+}
+.job-error {
+  margin-top: 7px;
+  color: #e15b64;
+  font-size: 10px;
+}
+.job-output {
+  margin-top: 7px;
+  overflow: hidden;
+  color: #858da0;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-actions {
+  display: grid;
+  gap: 4px;
 }
 </style>

@@ -38,10 +38,20 @@ const circleSize = ref(4)
 const generateHitsounds = ref(true)
 const isAdvanced = ref(false)
 const attempted = ref(false)
+const creating = ref(false)
+const scenario = ref('success')
 
 const modelOptions = [
   { label: 'Mapperatorinator Standard · v1.3', value: 'standard' },
   { label: 'Mapperatorinator High SR · v1.1', value: 'high-sr' },
+]
+const scenarioOptions = [
+  { label: 'Success', value: 'success' },
+  { label: 'Generation failure', value: 'failure' },
+  { label: 'CUDA out of memory', value: 'oom' },
+  { label: 'Worker timeout', value: 'hang' },
+  { label: 'Unexpected process exit', value: 'crash' },
+  { label: 'Malformed protocol message', value: 'malformed' },
 ]
 const canGenerate = computed(() =>
   Boolean(audioFile.value && title.value.trim() && artist.value.trim()),
@@ -60,21 +70,29 @@ async function chooseAudio() {
   if (!title.value) title.value = fileName.replace(/\.[^/.]+$/, '').replaceAll('-', ' ')
 }
 
-function createJob() {
+async function createJob() {
   attempted.value = true
   if (!canGenerate.value) {
     message.warning('Add an audio file, title, and artist before generating.')
     return
   }
-  jobsStore.addJob({
-    title: title.value.trim(),
-    artist: artist.value.trim(),
-    audioFile: audioFile.value,
-    model: model.value === 'high-sr' ? 'Mapperatorinator High SR' : 'Mapperatorinator Standard',
-    difficulty: difficulty.value,
-  })
-  message.success('Generation job added to the queue.')
-  router.push('/jobs')
+  creating.value = true
+  try {
+    await jobsStore.createJob({
+      title: title.value.trim(),
+      artist: artist.value.trim(),
+      audioFile: audioFile.value,
+      model: model.value === 'high-sr' ? 'Mapperatorinator High SR' : 'Mapperatorinator Standard',
+      difficulty: difficulty.value,
+      scenario: scenario.value,
+    })
+    message.success('Worker job added to the queue.')
+    router.push('/jobs')
+  } catch (reason) {
+    message.error(`Could not create job: ${String(reason)}`)
+  } finally {
+    creating.value = false
+  }
 }
 </script>
 
@@ -176,12 +194,15 @@ function createJob() {
               </div>
               <NSwitch v-model:value="generateHitsounds" />
             </div>
+            <NFormItem label="Mock worker result">
+              <NSelect v-model:value="scenario" :options="scenarioOptions" />
+            </NFormItem>
           </template>
         </NForm>
         <NAlert class="local-note" type="info" :show-icon="false"
           >Generation runs locally. Your audio never leaves this computer.</NAlert
         >
-        <NButton type="primary" size="large" block @click="createJob">
+        <NButton type="primary" size="large" block :loading="creating" @click="createJob">
           <template #icon><NIcon :component="SparklesOutline" /></template>Generate beatmap
         </NButton>
         <div class="estimate">
