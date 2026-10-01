@@ -4,8 +4,14 @@ import { open } from '@tauri-apps/plugin-dialog'
 import type {
   AppPaths,
   AppSettings,
+  ComputeBackend,
+  EnvironmentDiagnostics,
+  EnvironmentInstallEvent,
   GenerationJob,
+  ManagedPackage,
+  ModelInfo,
   OsuInstallation,
+  RuntimeInfo,
   StartJobInput,
   SystemInfo,
 } from '@/types'
@@ -56,6 +62,69 @@ export async function createDesktopJob(input: StartJobInput) {
 
 export async function listDesktopJobs() {
   return invoke<GenerationJob[]>('list_jobs')
+}
+
+export async function listManagedPackages() {
+  return invoke<ManagedPackage[]>('list_managed_packages')
+}
+
+export async function downloadManagedPackage(packageId: string) {
+  return invoke<ManagedPackage>('download_managed_package', { packageId })
+}
+
+export async function installPythonRuntime() {
+  return invoke<ManagedPackage>('install_python_runtime')
+}
+
+export async function verifyPythonRuntime() {
+  return invoke<RuntimeInfo>('verify_python_runtime')
+}
+
+export async function removePythonRuntime() {
+  return invoke<ManagedPackage>('remove_python_runtime')
+}
+
+export async function installModelPackage(packageId: string) {
+  return invoke<ManagedPackage>('install_model_package', { packageId })
+}
+
+export async function verifyModelPackage(packageId: string) {
+  return invoke<ModelInfo>('verify_model_package', { packageId })
+}
+
+export async function removeModelPackage(packageId: string) {
+  return invoke<ManagedPackage>('remove_model_package', { packageId })
+}
+
+export async function diagnoseAiEnvironment() {
+  return invoke<EnvironmentDiagnostics>('diagnose_ai_environment')
+}
+
+export async function installAiDependencies(backend: ComputeBackend) {
+  return invoke<EnvironmentDiagnostics>('install_ai_dependencies', { backend })
+}
+
+export function onEnvironmentInstallEvent(
+  handler: (event: EnvironmentInstallEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<EnvironmentInstallEvent>('environment-install-event', (event) =>
+    handler(event.payload),
+  )
+}
+
+export function onPackageProgressEvent(
+  handler: (event: Pick<ManagedPackage, 'id' | 'status' | 'progress' | 'bytesDownloaded' | 'sizeBytes'>) => void,
+): Promise<UnlistenFn> {
+  return listen('package-progress-event', (event) => {
+    const payload = event.payload as {
+      packageId: string
+      status: ManagedPackage['status']
+      progress: number
+      bytesDownloaded: number
+      sizeBytes: number
+    }
+    handler({ ...payload, id: payload.packageId })
+  })
 }
 
 export async function cancelDesktopJob(jobId: string) {

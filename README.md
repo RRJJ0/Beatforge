@@ -389,6 +389,17 @@ draw.io 原始檔必須納入版本控制；必要畫面另匯出 SVG 或 PNG，
 
 目標：讓沒有 Python 開發環境的使用者也能完成安裝。
 
+目前進度：
+
+- [x] 4.1：建立 package manifest schema、SQLite 安裝狀態與合法狀態轉換。
+- [x] 4.2：下載、續傳、checksum 與磁碟空間檢查。
+- [x] 4.3：獨立 Python runtime 管理。
+- [x] 4.4：FFmpeg、PyTorch 與 CUDA 相容性處理。
+- [x] 4.5：模型安裝、更新、移除與修復。
+- [x] 4.6：空機及異常情境驗收。
+  - [x] 暫存 clean profile 與異常情境自動化驗收。
+  - [x] 實體空白 Windows 完整下載與重啟驗收。
+
 工作項目：
 
 - 建立獨立、固定版本的 Python runtime。
@@ -409,6 +420,29 @@ draw.io 原始檔必須納入版本控制；必要畫面另匯出 SVG 或 PNG，
 - 全新 Windows 環境不需使用者自行安裝 Python。
 - 中斷下載後可安全恢復。
 - checksum 錯誤或空間不足時不會留下可被誤用的安裝狀態。
+
+#### 4.4 Runtime 相容矩陣
+
+桌面程式使用私有 Python 環境安裝固定版本的 PyTorch 2.10.0、torchaudio 2.10.0 與 imageio-ffmpeg 0.6.0，不修改系統 Python 或全域 PATH。PyTorch wheel 內含 CUDA runtime，因此使用者不需另外安裝 CUDA Toolkit；桌面程式只依 NVIDIA 驅動選擇經測試的 wheel channel。
+
+| NVIDIA Windows 驅動 | 建議套件 | PyTorch index |
+|---|---|---|
+| 580.00 以上 | CUDA 13.0 | `cu130` |
+| 570.65–579.xx | CUDA 12.8 | `cu128` |
+| 560.76–570.64 | CUDA 12.6 | `cu126` |
+| 更舊、無法辨識或沒有 NVIDIA GPU | CPU fallback | `cpu` |
+
+安裝前會檢查私有 Python 與 pip；安裝後會實際 import PyTorch／torchaudio、執行 FFmpeg 版本檢查，並確認 CUDA wheel 能看見 GPU。FFmpeg 執行檔由 `imageio-ffmpeg` 的 Windows wheel 提供，後續正式 worker 應以診斷回傳的絕對路徑設定 `IMAGEIO_FFMPEG_EXE`，避免依賴使用者的系統 PATH。
+
+#### 4.5 模型套件
+
+MVP 鎖定官方 `OliBomby/Mapperatorinator-v32` repository 的 commit `74f22583400d259bf424819e11027c17933efe54`，首個套件只安裝 osu!standard checkpoint。模型 manifest 分別記錄 `model.safetensors`、`config.json`、`generation_config.json` 與 `tokenizer.json` 的固定 URL、大小和 SHA-256，總下載量約 830 MB。
+
+下載支援逐檔續傳與整體進度；所有檔案通過大小及 checksum 驗證後，才會從 staging directory 原子切換成可用版本。更新保留舊版本直到新版本啟用成功，修復會重新下載缺少或損毀的檔案，移除操作只允許刪除應用程式管理的 model/cache 目錄。
+
+#### 4.6 驗收
+
+自動化驗收使用隔離的暫存 application profile 與小型 fixture，不修改真實 AppData，也不下載正式權重。測試涵蓋首次安裝生命週期、下載／安裝中斷復原、checksum 損毀、空間不足、更新失敗回滾、manifest 更新及越界刪除防護。完整矩陣與實體空機步驟見 `docs/testing/stage-4-runtime-model-acceptance.md`。
 
 ### 階段 5：Mapperatorinator 整合
 

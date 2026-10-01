@@ -24,15 +24,79 @@ export interface StartJobInput {
   difficulty: number
   scenario: string
 }
-export interface ModelPackage {
+export type PackageKind = 'runtime' | 'model'
+export type PackageStatus =
+  | 'not_installed'
+  | 'queued'
+  | 'downloading'
+  | 'verifying'
+  | 'downloaded'
+  | 'installing'
+  | 'installed'
+  | 'update_available'
+  | 'removing'
+  | 'failed'
+
+export interface ManagedPackage {
   id: string
+  kind: PackageKind
   name: string
-  version: string
   description: string
-  size: string
-  status: 'installed' | 'available' | 'downloading'
-  progress?: number
-  recommended?: boolean
+  targetVersion: string
+  installedVersion?: string
+  status: PackageStatus
+  progress: number
+  bytesDownloaded: number
+  sizeBytes: number
+  artifactPath?: string
+  installPath?: string
+  errorMessage?: string
+  recommended: boolean
+  updatedAt: string
+}
+
+export interface RuntimeInfo {
+  version: string
+  path: string
+  executable: string
+  healthy: boolean
+}
+
+export interface ModelInfo {
+  id: string
+  version: string
+  path: string
+  sizeBytes: number
+  files: string[]
+  healthy: boolean
+}
+
+export type ComputeBackend = 'cuda130' | 'cuda128' | 'cuda126' | 'cpu'
+
+export interface ComponentDiagnostic {
+  installed: boolean
+  version?: string
+  path?: string
+  error?: string
+}
+
+export interface EnvironmentDiagnostics {
+  python: ComponentDiagnostic
+  pip: ComponentDiagnostic
+  ffmpeg: ComponentDiagnostic
+  pytorch: ComponentDiagnostic
+  gpuName?: string
+  driverVersion?: string
+  cudaAvailable: boolean
+  recommendedBackend: ComputeBackend
+  compatibilityReason: string
+  ready: boolean
+}
+
+export interface EnvironmentInstallEvent {
+  stage: string
+  progress: number
+  message: string
 }
 
 export interface AppPaths {

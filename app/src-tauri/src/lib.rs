@@ -8,11 +8,19 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use sysinfo::{Disks, System};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
+mod downloads;
+mod environment;
+mod install_recovery;
 mod jobs;
 mod mock_worker;
+mod models;
+mod packages;
 mod protocol;
+mod runtime;
+#[cfg(test)]
+mod stage4_acceptance;
 mod worker;
 
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -142,6 +150,8 @@ pub(crate) fn open_database(app: &AppHandle) -> Result<(Connection, AppPaths), S
      INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);",
   ).map_err(|error| error.to_string())?;
     jobs::migrate(&connection)?;
+    packages::migrate(&connection)?;
+    packages::sync_manifest(&connection, &packages::builtin_manifest())?;
     Ok((connection, paths))
 }
 
@@ -330,6 +340,648 @@ fn list_jobs(app: AppHandle) -> Result<Vec<jobs::JobRecord>, String> {
 }
 
 #[tauri::command]
+fn list_managed_packages(app: AppHandle) -> Result<Vec<packages::ManagedPackage>, String> {
+    let (connection, _) = open_database(&app)?;
+    packages::list(&connection)
+}
+
+#[tauri::command]
+async fn download_managed_package(
+    app: AppHandle,
+    package_id: String,
+) -> Result<packages::ManagedPackage, String> {
+    let (connection, paths) = open_database(&app)?;
+    let spec = packages::get_spec(&connection, &package_id)?;
+    let current = packages::get(&connection, &package_id)?
+        .ok_or_else(|| format!("Unknown package: {package_id}"))?;
+    packages::transition(
+        &connection,
+        &package_id,
+        packages::PackageStatus::Queued,
+        current.progress,
+        current.bytes_downloaded,
+        None,
+        None,
+        None,
+    )?;
+    packages::transition(
+        &connection,
+        &package_id,
+        packages::PackageStatus::Downloading,
+        current.progress,
+        current.bytes_downloaded,
+        None,
+        None,
+        None,
+    )?;
+    drop(connection);
+
+    let destination = PathBuf::from(&paths.cache)
+        .join("downloads")
+        .join(&spec.id)
+        .join(&spec.version);
+    let database_path = paths.database.clone();
+    let worker_database_path = database_path.clone();
+    let worker_package_id = package_id.clone();
+    let worker_app = app.clone();
+    let total_size = spec.total_size();
+    let artifacts: Vec<_> = spec.artifacts().cloned().collect();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let connection =
+            Connection::open(&worker_database_path).map_err(|error| error.to_string())?;
+        let mut completed_bytes = 0_u64;
+        let mut first_path = None;
+        for artifact in &artifacts {
+            let path = downloads::download_artifact(
+                &worker_package_id,
+                artifact,
+                &destination,
+                |event| {
+                    let bytes_downloaded = completed_bytes.saturating_add(event.bytes_downloaded);
+                    let progress = bytes_downloaded
+                        .saturating_mul(100)
+                        .checked_div(total_size)
+                        .unwrap_or(0)
+                        .min(99) as u8;
+                    let aggregate = downloads::PackageProgressEvent {
+                        package_id: worker_package_id.clone(),
+                        status: packages::PackageStatus::Downloading,
+                        progress,
+                        bytes_downloaded,
+                        size_bytes: total_size,
+                    };
+                    packages::transition(
+                        &connection,
+                        &worker_package_id,
+                        aggregate.status,
+                        aggregate.progress,
+                        aggregate.bytes_downloaded,
+                        None,
+                        None,
+                        None,
+                    )?;
+                    worker_app
+                        .emit("package-progress-event", &aggregate)
+                        .map_err(|error| error.to_string())
+                },
+            )?;
+            first_path.get_or_insert(path);
+            completed_bytes = completed_bytes.saturating_add(artifact.size_bytes);
+        }
+        packages::transition(
+            &connection,
+            &worker_package_id,
+            packages::PackageStatus::Verifying,
+            100,
+            total_size,
+            None,
+            None,
+            None,
+        )?;
+        worker_app
+            .emit(
+                "package-progress-event",
+                downloads::PackageProgressEvent {
+                    package_id: worker_package_id,
+                    status: packages::PackageStatus::Verifying,
+                    progress: 100,
+                    bytes_downloaded: total_size,
+                    size_bytes: total_size,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        if artifacts.len() == 1 {
+            first_path.ok_or_else(|| "Package has no artifact".to_string())
+        } else {
+            Ok(destination)
+        }
+    })
+    .await
+    .map_err(|error| format!("Download task failed: {error}"))?;
+
+    let connection = Connection::open(&database_path).map_err(|error| error.to_string())?;
+    match result {
+        Ok(artifact_path) => {
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Downloaded,
+                100,
+                total_size,
+                None,
+                None,
+                None,
+            )?;
+            packages::set_artifact_path(&connection, &package_id, &path_string(&artifact_path))?;
+        }
+        Err(error) => {
+            let current = packages::get(&connection, &package_id)?
+                .ok_or_else(|| format!("Unknown package: {package_id}"))?;
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Failed,
+                current.progress,
+                current.bytes_downloaded,
+                None,
+                None,
+                Some(&error),
+            )?;
+            return Err(error);
+        }
+    }
+    packages::get(&connection, &package_id)?.ok_or_else(|| format!("Unknown package: {package_id}"))
+}
+
+#[tauri::command]
+async fn install_python_runtime(app: AppHandle) -> Result<packages::ManagedPackage, String> {
+    let package_id = packages::PYTHON_RUNTIME_ID.to_string();
+    let (connection, paths) = open_database(&app)?;
+    let current = packages::get(&connection, &package_id)?
+        .ok_or_else(|| "Python runtime package is missing from the manifest".to_string())?;
+    if current.kind != packages::PackageKind::Runtime {
+        return Err("Python runtime manifest entry has an invalid package kind".into());
+    }
+    if current.status == packages::PackageStatus::Installed {
+        let install_path = current
+            .install_path
+            .as_deref()
+            .ok_or_else(|| "Installed Python runtime has no install path".to_string())?;
+        return match runtime::verify_python_runtime(
+            Path::new(install_path),
+            &current.target_version,
+        ) {
+            Ok(_) => Ok(current),
+            Err(error) => {
+                packages::transition(
+                    &connection,
+                    &package_id,
+                    packages::PackageStatus::Failed,
+                    current.progress,
+                    current.bytes_downloaded,
+                    None,
+                    None,
+                    Some(&error),
+                )?;
+                Err(error)
+            }
+        };
+    }
+    drop(connection);
+
+    let downloaded = if current.status == packages::PackageStatus::Downloaded {
+        current
+    } else {
+        download_managed_package(app.clone(), package_id.clone()).await?
+    };
+    let archive_path = downloaded
+        .artifact_path
+        .as_deref()
+        .ok_or_else(|| "Downloaded Python runtime has no artifact path".to_string())?;
+    let archive_path = PathBuf::from(archive_path);
+    let runtime_root = PathBuf::from(&paths.runtime);
+    let version = downloaded.target_version.clone();
+    let database_path = paths.database.clone();
+    let connection = Connection::open(&database_path).map_err(|error| error.to_string())?;
+    packages::transition(
+        &connection,
+        &package_id,
+        packages::PackageStatus::Installing,
+        100,
+        downloaded.size_bytes,
+        None,
+        None,
+        None,
+    )?;
+    app.emit(
+        "package-progress-event",
+        downloads::PackageProgressEvent {
+            package_id: package_id.clone(),
+            status: packages::PackageStatus::Installing,
+            progress: 100,
+            bytes_downloaded: downloaded.size_bytes,
+            size_bytes: downloaded.size_bytes,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    drop(connection);
+
+    let worker_version = version.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        runtime::install_python_runtime(&archive_path, &runtime_root, &worker_version)
+    })
+    .await
+    .map_err(|error| format!("Runtime installation task failed: {error}"))?;
+
+    let connection = Connection::open(&database_path).map_err(|error| error.to_string())?;
+    match result {
+        Ok(info) => {
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Installed,
+                100,
+                downloaded.size_bytes,
+                Some(&version),
+                Some(&info.path),
+                None,
+            )?;
+        }
+        Err(error) => {
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Failed,
+                100,
+                downloaded.size_bytes,
+                None,
+                None,
+                Some(&error),
+            )?;
+            return Err(error);
+        }
+    }
+    packages::get(&connection, &package_id)?
+        .ok_or_else(|| "Installed Python runtime could not be loaded".to_string())
+}
+
+#[tauri::command]
+fn verify_python_runtime(app: AppHandle) -> Result<runtime::RuntimeInfo, String> {
+    let (connection, _) = open_database(&app)?;
+    let package = packages::get(&connection, packages::PYTHON_RUNTIME_ID)?
+        .ok_or_else(|| "Python runtime package is missing from the manifest".to_string())?;
+    if package.status != packages::PackageStatus::Installed {
+        return Err("Python runtime is not installed".into());
+    }
+    let install_path = package
+        .install_path
+        .as_deref()
+        .ok_or_else(|| "Installed Python runtime has no install path".to_string())?;
+    match runtime::verify_python_runtime(Path::new(install_path), &package.target_version) {
+        Ok(info) => Ok(info),
+        Err(error) => {
+            packages::transition(
+                &connection,
+                packages::PYTHON_RUNTIME_ID,
+                packages::PackageStatus::Failed,
+                package.progress,
+                package.bytes_downloaded,
+                None,
+                None,
+                Some(&error),
+            )?;
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+async fn remove_python_runtime(app: AppHandle) -> Result<packages::ManagedPackage, String> {
+    let package_id = packages::PYTHON_RUNTIME_ID.to_string();
+    let (connection, paths) = open_database(&app)?;
+    let current = packages::get(&connection, &package_id)?
+        .ok_or_else(|| "Python runtime package is missing from the manifest".to_string())?;
+    if current.status == packages::PackageStatus::NotInstalled {
+        return Ok(current);
+    }
+    packages::transition(
+        &connection,
+        &package_id,
+        packages::PackageStatus::Removing,
+        current.progress,
+        current.bytes_downloaded,
+        None,
+        None,
+        None,
+    )?;
+    app.emit(
+        "package-progress-event",
+        downloads::PackageProgressEvent {
+            package_id: package_id.clone(),
+            status: packages::PackageStatus::Removing,
+            progress: current.progress,
+            bytes_downloaded: current.bytes_downloaded,
+            size_bytes: current.size_bytes,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    drop(connection);
+
+    let install_path = current.install_path.clone();
+    let artifact_path = current.artifact_path.clone();
+    let runtime_root = PathBuf::from(paths.runtime);
+    let cache_root = PathBuf::from(paths.cache);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        runtime::remove_runtime_files(
+            install_path.as_deref(),
+            artifact_path.as_deref(),
+            &runtime_root,
+            &cache_root,
+        )
+    })
+    .await
+    .map_err(|error| format!("Runtime removal task failed: {error}"))?;
+
+    let (connection, _) = open_database(&app)?;
+    if let Err(error) = result {
+        packages::transition(
+            &connection,
+            &package_id,
+            packages::PackageStatus::Failed,
+            current.progress,
+            current.bytes_downloaded,
+            None,
+            None,
+            Some(&error),
+        )?;
+        return Err(error);
+    }
+    packages::finish_removal(&connection, &package_id)?;
+    packages::get(&connection, &package_id)?
+        .ok_or_else(|| "Removed Python runtime could not be loaded".to_string())
+}
+
+fn ensure_package_requirements(
+    connection: &Connection,
+    spec: &packages::PackageSpec,
+) -> Result<(), String> {
+    for requirement in &spec.requirements {
+        let installed = packages::get(connection, &requirement.package_id)?
+            .ok_or_else(|| format!("Required package {} is unavailable", requirement.package_id))?;
+        if installed.status != packages::PackageStatus::Installed
+            || installed.installed_version.as_deref() != Some(requirement.version.as_str())
+        {
+            return Err(format!(
+                "{} {} must be installed first",
+                installed.name, requirement.version
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn install_model_package(
+    app: AppHandle,
+    package_id: String,
+) -> Result<packages::ManagedPackage, String> {
+    let (connection, paths) = open_database(&app)?;
+    let spec = packages::get_spec(&connection, &package_id)?;
+    if spec.kind != packages::PackageKind::Model {
+        return Err("The selected package is not a model".into());
+    }
+    ensure_package_requirements(&connection, &spec)?;
+    let current = packages::get(&connection, &package_id)?
+        .ok_or_else(|| format!("Unknown package: {package_id}"))?;
+    if current.status == packages::PackageStatus::Installed {
+        let path = current
+            .install_path
+            .as_deref()
+            .ok_or_else(|| "Installed model has no install path".to_string())?;
+        return match models::verify_model(Path::new(path), &spec) {
+            Ok(_) => Ok(current),
+            Err(error) => {
+                packages::transition(
+                    &connection,
+                    &package_id,
+                    packages::PackageStatus::Failed,
+                    current.progress,
+                    current.bytes_downloaded,
+                    None,
+                    None,
+                    Some(&error),
+                )?;
+                Err(error)
+            }
+        };
+    }
+    let previous_install_path = current.install_path.clone();
+    drop(connection);
+
+    let downloaded = if current.status == packages::PackageStatus::Downloaded {
+        current
+    } else {
+        download_managed_package(app.clone(), package_id.clone()).await?
+    };
+    let download_path = downloaded
+        .artifact_path
+        .as_deref()
+        .ok_or_else(|| "Downloaded model has no artifact path".to_string())?;
+    let download_path = PathBuf::from(download_path);
+    let models_root = PathBuf::from(&paths.models);
+    let version = spec.version.clone();
+    let connection = Connection::open(&paths.database).map_err(|error| error.to_string())?;
+    packages::transition(
+        &connection,
+        &package_id,
+        packages::PackageStatus::Installing,
+        100,
+        spec.total_size(),
+        None,
+        None,
+        None,
+    )?;
+    drop(connection);
+
+    let worker_spec = spec.clone();
+    let worker_models_root = models_root.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        models::install_model(&download_path, &worker_models_root, &worker_spec)
+    })
+    .await
+    .map_err(|error| format!("Model installation task failed: {error}"))?;
+
+    let connection = Connection::open(&paths.database).map_err(|error| error.to_string())?;
+    match result {
+        Ok(info) => {
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Installed,
+                100,
+                spec.total_size(),
+                Some(&version),
+                Some(&info.path),
+                None,
+            )?;
+            if previous_install_path.as_deref() != Some(info.path.as_str()) {
+                let _ = models::remove_model_files(
+                    previous_install_path.as_deref(),
+                    None,
+                    &models_root,
+                    Path::new(&paths.cache),
+                );
+            }
+        }
+        Err(error) => {
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Failed,
+                100,
+                downloaded.bytes_downloaded,
+                None,
+                None,
+                Some(&error),
+            )?;
+            return Err(error);
+        }
+    }
+    packages::get(&connection, &package_id)?
+        .ok_or_else(|| "Installed model could not be loaded".to_string())
+}
+
+#[tauri::command]
+fn verify_model_package(app: AppHandle, package_id: String) -> Result<models::ModelInfo, String> {
+    let (connection, _) = open_database(&app)?;
+    let spec = packages::get_spec(&connection, &package_id)?;
+    if spec.kind != packages::PackageKind::Model {
+        return Err("The selected package is not a model".into());
+    }
+    let package = packages::get(&connection, &package_id)?
+        .ok_or_else(|| format!("Unknown package: {package_id}"))?;
+    let path = package
+        .install_path
+        .as_deref()
+        .ok_or_else(|| "Model is not installed".to_string())?;
+    match models::verify_model(Path::new(path), &spec) {
+        Ok(info) => Ok(info),
+        Err(error) => {
+            if package.status == packages::PackageStatus::Installed {
+                packages::transition(
+                    &connection,
+                    &package_id,
+                    packages::PackageStatus::Failed,
+                    package.progress,
+                    package.bytes_downloaded,
+                    None,
+                    None,
+                    Some(&error),
+                )?;
+            }
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+async fn remove_model_package(
+    app: AppHandle,
+    package_id: String,
+) -> Result<packages::ManagedPackage, String> {
+    let (connection, paths) = open_database(&app)?;
+    let spec = packages::get_spec(&connection, &package_id)?;
+    if spec.kind != packages::PackageKind::Model {
+        return Err("The selected package is not a model".into());
+    }
+    let current = packages::get(&connection, &package_id)?
+        .ok_or_else(|| format!("Unknown package: {package_id}"))?;
+    if current.status == packages::PackageStatus::NotInstalled {
+        return Ok(current);
+    }
+    packages::transition(
+        &connection,
+        &package_id,
+        packages::PackageStatus::Removing,
+        current.progress,
+        current.bytes_downloaded,
+        None,
+        None,
+        None,
+    )?;
+    drop(connection);
+
+    let install_path = current.install_path.clone();
+    let artifact_path = current.artifact_path.clone();
+    let models_root = PathBuf::from(paths.models);
+    let cache_root = PathBuf::from(paths.cache);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        models::remove_model_files(
+            install_path.as_deref(),
+            artifact_path.as_deref(),
+            &models_root,
+            &cache_root,
+        )
+    })
+    .await
+    .map_err(|error| format!("Model removal task failed: {error}"))?;
+
+    let (connection, _) = open_database(&app)?;
+    if let Err(error) = result {
+        packages::transition(
+            &connection,
+            &package_id,
+            packages::PackageStatus::Failed,
+            current.progress,
+            current.bytes_downloaded,
+            None,
+            None,
+            Some(&error),
+        )?;
+        return Err(error);
+    }
+    packages::finish_removal(&connection, &package_id)?;
+    packages::get(&connection, &package_id)?
+        .ok_or_else(|| "Removed model could not be loaded".to_string())
+}
+
+fn installed_python(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let (connection, _) = open_database(app)?;
+    let package = packages::get(&connection, packages::PYTHON_RUNTIME_ID)?;
+    Ok(environment::python_executable(
+        package
+            .as_ref()
+            .and_then(|item| item.install_path.as_deref()),
+    ))
+}
+
+#[tauri::command]
+async fn diagnose_ai_environment(
+    app: AppHandle,
+) -> Result<environment::EnvironmentDiagnostics, String> {
+    let python = installed_python(&app)?;
+    let gpu = detect_gpu();
+    let gpu_name = gpu.available.then_some(gpu.name);
+    let driver_version = gpu.driver_version;
+    tauri::async_runtime::spawn_blocking(move || {
+        environment::diagnose(python.as_deref(), gpu_name, driver_version)
+    })
+    .await
+    .map_err(|error| format!("Environment diagnostic task failed: {error}"))
+}
+
+#[tauri::command]
+async fn install_ai_dependencies(
+    app: AppHandle,
+    manager: tauri::State<'_, environment::EnvironmentManager>,
+    backend: environment::ComputeBackend,
+) -> Result<environment::EnvironmentDiagnostics, String> {
+    manager.begin()?;
+    let result = async {
+        let python = installed_python(&app)?.ok_or_else(|| {
+            "Install the private Python runtime before AI dependencies".to_string()
+        })?;
+        let gpu = detect_gpu();
+        let gpu_name = gpu.available.then_some(gpu.name);
+        let driver_version = gpu.driver_version;
+        let worker_app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            environment::install_dependencies(&worker_app, &python, backend)?;
+            Ok::<_, String>(environment::diagnose(
+                Some(&python),
+                gpu_name,
+                driver_version,
+            ))
+        })
+        .await
+        .map_err(|error| format!("Dependency installation task failed: {error}"))?
+    }
+    .await;
+    manager.finish();
+    result
+}
+
+#[tauri::command]
 fn cancel_job(
     manager: tauri::State<'_, worker::WorkerManager>,
     job_id: String,
@@ -363,7 +1015,9 @@ pub fn run() {
         .setup(|app| {
             let (connection, _) = open_database(app.handle()).map_err(std::io::Error::other)?;
             jobs::mark_interrupted(&connection).map_err(std::io::Error::other)?;
+            packages::mark_interrupted(&connection).map_err(std::io::Error::other)?;
             app.manage(worker::WorkerManager::new(app.handle().clone()));
+            app.manage(environment::EnvironmentManager::new());
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -381,6 +1035,16 @@ pub fn run() {
             save_settings,
             create_job,
             list_jobs,
+            list_managed_packages,
+            download_managed_package,
+            install_python_runtime,
+            verify_python_runtime,
+            remove_python_runtime,
+            diagnose_ai_environment,
+            install_ai_dependencies,
+            install_model_package,
+            verify_model_package,
+            remove_model_package,
             cancel_job,
             retry_job,
             delete_job
