@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "source": {
+    "repository": "https://github.com/OliBomby/Mapperatorinator",
+    "commit": "0e2b0e387aab4b35c64b0b11b12d47578dea7587",
+    "committedAt": "2026-08-13T16:20:12Z",
+    "archive": {
+      "url": "https://github.com/OliBomby/Mapperatorinator/archive/0e2b0e387aab4b35c64b0b11b12d47578dea7587.tar.gz",
+      "fileName": "mapperatorinator-0e2b0e387aab4b35c64b0b11b12d47578dea7587.tar.gz",
+      "sizeBytes": 2397391,
+      "sha256": "a7e100fc876cc9e63e67d93ad446807dfa1d724b7278317adb538de97d6e5513"
+    },
+    "license": {
+      "spdx": "MIT",
+      "file": "LICENSE",
+      "sha256": "076d05221514964978c2f9f6994f79cf5ade32a1737a89040a0b7f8636e8921f"
+    }
+  },
+  "slider": {
+    "repository": "https://github.com/OliBomby/slider",
+    "commit": "ea28c484a0a542d6e094e25aa02e1529ff2c8313",
+    "committedAt": "2026-04-12T17:07:03Z",
+    "version": "0.8.2",
+    "archive": {
+      "url": "https://github.com/OliBomby/slider/archive/ea28c484a0a542d6e094e25aa02e1529ff2c8313.tar.gz",
+      "fileName": "slider-ea28c484a0a542d6e094e25aa02e1529ff2c8313.tar.gz",
+      "sizeBytes": 150932,
+      "sha256": "7c6ea509942d6f5a11e81e4775a07f5b96cc0369d49d4665f64d78bab904d5ec"
+    },
+    "license": {
+      "spdx": "LGPL-3.0-or-later",
+      "file": "LICENSE",
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+    }
+  },
+  "dependencies": {
+    "pythonVersion": "3.10",
+    "platform": "windows-x86_64",
+    "resolver": "uv 0.12.21",
+    "fileName": "mapperatorinator-windows-py310.requirements.txt",
+    "packageCount": 41,
+    "sha256": "bfe25261920994e369bd9e2b0eb2eb37396f96dd319f9d74d7060c70fe05d34a"
+  },
+  "model": {
+    "repository": "https://huggingface.co/OliBomby/Mapperatorinator-v32",
+    "revision": "74f22583400d259bf424819e11027c17933efe54",
+    "packageId": "mapperatorinator-v32-standard",
+    "license": "MIT"
+  },
+  "inspectedFiles": [
+    { "path": "inference.py", "sizeBytes": 30400, "sha256": "98da5622472082e7ca7bc638a2573cbc524aa2632b9133b467cb12029fbae063" },
+    { "path": "requirements.txt", "sizeBytes": 498, "sha256": "e7cdf1767e2cce3a353f0afa5da1903561f897eb6906e33bc1c503e387c9a0b0" },
+    { "path": "LICENSE", "sizeBytes": 1065, "sha256": "076d05221514964978c2f9f6994f79cf5ade32a1737a89040a0b7f8636e8921f" },
+    { "path": "configs/inference/v32.yaml", "sizeBytes": 645, "sha256": "ff6f100be5f2ab241c6c0929e8df3f8780cac2c76494880689870a26e8be9ba3" },
+    { "path": "osuT5/osuT5/utils/__init__.py", "sizeBytes": 84, "sha256": "da1614ab8f5d9131f70739a9b082ce46b6eef34e5f8f850db7ffb700cce4fbc8" }
+  ],
+  "integration": {
+    "configName": "v32",
+    "adapterStrategy": "python_api",
+    "supportedGamemodes": [0],
+    "callableSurface": [
+      "compile_args",
+      "setup_inference_environment",
+      "load_model_with_server",
+      "get_config",
+      "generate"
+    ],
+    "stdoutPolicy": "json_lines_only",
+    "excludedFeatures": [
+      "hydra_cli",
+      "web_ui",
+      "mai_mod",
+      "training",
+      "lora_training",
+      "remote_model_resolution",
+      "non_standard_gamemodes"
+    ]
+  }
+}

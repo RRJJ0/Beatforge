@@ -12,12 +12,16 @@ use tauri::{AppHandle, Emitter, Manager};
 
 mod downloads;
 mod environment;
+mod formal_worker;
 mod install_recovery;
 mod jobs;
+mod mapperatorinator;
+mod mapperatorinator_lock;
 mod mock_worker;
 mod models;
 mod packages;
 mod protocol;
+mod request_adapter;
 mod runtime;
 #[cfg(test)]
 mod stage4_acceptance;
@@ -95,7 +99,7 @@ impl AppSettings {
             temp_path: paths.cache.clone(),
             osu_path: String::new(),
             device: "cuda".into(),
-            precision: "fp16".into(),
+            precision: "bf16".into(),
             workers: 2,
             auto_import: true,
             keep_intermediate: false,
@@ -249,17 +253,27 @@ fn detect_osu_installations() -> Vec<OsuInstallation> {
 
 #[tauri::command]
 fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
-    let (connection, paths) = open_database(&app)?;
+    load_settings_value(&app)
+}
+
+fn load_settings_value(app: &AppHandle) -> Result<AppSettings, String> {
+    let (connection, paths) = open_database(app)?;
     let value: Option<String> = connection
         .query_row("SELECT value FROM settings WHERE id = 1", [], |row| {
             row.get(0)
         })
         .optional()
         .map_err(|error| error.to_string())?;
-    match value {
-        Some(json) => serde_json::from_str(&json).map_err(|error| error.to_string()),
-        None => Ok(AppSettings::default_for(&paths)),
+    let mut settings = match value {
+        Some(json) => serde_json::from_str(&json).map_err(|error| error.to_string())?,
+        None => AppSettings::default_for(&paths),
+    };
+    // V32 uses bf16 on CUDA. Migrate the old fp16 default, which can produce
+    // invalid sampling probabilities during timing generation.
+    if settings.precision == "fp16" {
+        settings.precision = "bf16".into();
     }
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -286,37 +300,45 @@ fn next_job_id() -> String {
 }
 
 fn validate_job_input(input: &protocol::StartJobInput) -> Result<(), String> {
-    if input.title.trim().is_empty() || input.title.len() > 200 {
-        return Err("Title must contain between 1 and 200 characters".into());
+    request_adapter::validate_domain(input)
+}
+
+fn build_production_request(
+    app: &AppHandle,
+    job_id: &str,
+    input: &protocol::StartJobInput,
+) -> Result<request_adapter::ProductionWorkerStartCommand, String> {
+    let settings = load_settings_value(app)?;
+    let (connection, paths) = open_database(app)?;
+    let model = packages::get(&connection, packages::STANDARD_MODEL_ID)?
+        .ok_or_else(|| "Managed V32 model package is unavailable".to_string())?;
+    if model.status != packages::PackageStatus::Installed {
+        return Err("Install the managed V32 standard model before generating".into());
     }
-    if input.artist.trim().is_empty() || input.artist.len() > 200 {
-        return Err("Artist must contain between 1 and 200 characters".into());
-    }
-    if !(1.0..=8.0).contains(&input.difficulty) {
-        return Err("Difficulty must be between 1.0 and 8.0".into());
-    }
-    if input.model.trim().is_empty() || input.model.len() > 200 {
-        return Err("Model must contain between 1 and 200 characters".into());
-    }
-    let audio_path = Path::new(&input.audio_file);
-    if !audio_path.is_file() {
-        return Err("Selected audio file does not exist".into());
-    }
-    let extension = audio_path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if !matches!(extension.as_str(), "mp3" | "wav" | "ogg" | "flac") {
-        return Err("Unsupported audio file type".into());
-    }
-    if !matches!(
-        input.scenario.as_str(),
-        "success" | "failure" | "oom" | "hang" | "crash" | "malformed"
-    ) {
-        return Err("Unknown mock worker scenario".into());
-    }
-    Ok(())
+    let model_path = model
+        .install_path
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| "Installed model has no managed path".to_string())?;
+    let runtime_root = PathBuf::from(&paths.runtime);
+    let gpu = detect_gpu();
+    let source_path = mapperatorinator::managed_source_path(&runtime_root)?;
+    let source_commit = mapperatorinator_lock::builtin()?.source.commit;
+    let context = request_adapter::AdapterContext {
+        runtime_root,
+        models_root: PathBuf::from(paths.models),
+        jobs_root: PathBuf::from(paths.jobs),
+        source_path,
+        source_commit,
+        model_path,
+        model_version: model.target_version,
+        device: settings.device,
+        precision: settings.precision,
+        gpu_name: gpu.available.then_some(gpu.name),
+        gpu_memory_total_mb: gpu.memory_total_mb,
+        driver_version: gpu.driver_version,
+    };
+    request_adapter::build(job_id, input, &context)
 }
 
 #[tauri::command]
@@ -940,14 +962,52 @@ async fn diagnose_ai_environment(
     app: AppHandle,
 ) -> Result<environment::EnvironmentDiagnostics, String> {
     let python = installed_python(&app)?;
+    let paths = build_paths(&app)?;
+    let runtime_root = PathBuf::from(paths.runtime);
     let gpu = detect_gpu();
     let gpu_name = gpu.available.then_some(gpu.name);
     let driver_version = gpu.driver_version;
     tauri::async_runtime::spawn_blocking(move || {
-        environment::diagnose(python.as_deref(), gpu_name, driver_version)
+        environment::diagnose(
+            python.as_deref(),
+            Some(&runtime_root),
+            gpu_name,
+            driver_version,
+        )
     })
     .await
     .map_err(|error| format!("Environment diagnostic task failed: {error}"))
+}
+
+#[tauri::command]
+async fn diagnose_production_worker(app: AppHandle) -> Result<formal_worker::WorkerHealth, String> {
+    let python = installed_python(&app)?.ok_or_else(|| {
+        "Install the private Python runtime before checking the worker".to_string()
+    })?;
+    let (connection, paths) = open_database(&app)?;
+    let model = packages::get(&connection, packages::STANDARD_MODEL_ID)?
+        .ok_or_else(|| "Managed V32 model package is unavailable".to_string())?;
+    let model_path = (model.status == packages::PackageStatus::Installed)
+        .then(|| model.install_path.as_deref().map(PathBuf::from))
+        .flatten();
+    let model_version = model.target_version;
+    let runtime_root = PathBuf::from(paths.runtime);
+    let source_path = mapperatorinator::managed_source_path(&runtime_root)?;
+    let source_commit = mapperatorinator_lock::builtin()?.source.commit;
+    let log_path = PathBuf::from(paths.logs).join("production-worker.log");
+    tauri::async_runtime::spawn_blocking(move || {
+        formal_worker::health_check(
+            &python,
+            &runtime_root,
+            &source_path,
+            &source_commit,
+            model_path.as_deref(),
+            &model_version,
+            &log_path,
+        )
+    })
+    .await
+    .map_err(|error| format!("Production worker health task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -961,14 +1021,26 @@ async fn install_ai_dependencies(
         let python = installed_python(&app)?.ok_or_else(|| {
             "Install the private Python runtime before AI dependencies".to_string()
         })?;
+        let paths = build_paths(&app)?;
+        let runtime_root = PathBuf::from(paths.runtime);
+        let cache_root = PathBuf::from(paths.cache);
         let gpu = detect_gpu();
         let gpu_name = gpu.available.then_some(gpu.name);
         let driver_version = gpu.driver_version;
         let worker_app = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             environment::install_dependencies(&worker_app, &python, backend)?;
+            mapperatorinator::install(
+                &python,
+                &runtime_root,
+                &cache_root,
+                |stage, progress, message| {
+                    environment::emit_install_event(&worker_app, stage, progress, message)
+                },
+            )?;
             Ok::<_, String>(environment::diagnose(
                 Some(&python),
+                Some(&runtime_root),
                 gpu_name,
                 driver_version,
             ))
@@ -998,6 +1070,7 @@ fn retry_job(
     let (connection, _) = open_database(&app)?;
     let input =
         jobs::get_input(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    worker::cleanup_job_artifacts(&app, &job_id)?;
     jobs::reset_for_retry(&connection, &job_id)?;
     manager.enqueue(job_id, input)
 }
@@ -1013,8 +1086,13 @@ pub fn run() {
     let application = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            mapperatorinator_lock::validate_builtin().map_err(std::io::Error::other)?;
             let (connection, _) = open_database(app.handle()).map_err(std::io::Error::other)?;
+            let abandoned_jobs = jobs::active_ids(&connection).map_err(std::io::Error::other)?;
             jobs::mark_interrupted(&connection).map_err(std::io::Error::other)?;
+            for id in abandoned_jobs {
+                let _ = worker::cleanup_job_artifacts(app.handle(), &id);
+            }
             packages::mark_interrupted(&connection).map_err(std::io::Error::other)?;
             app.manage(worker::WorkerManager::new(app.handle().clone()));
             app.manage(environment::EnvironmentManager::new());
@@ -1041,6 +1119,7 @@ pub fn run() {
             verify_python_runtime,
             remove_python_runtime,
             diagnose_ai_environment,
+            diagnose_production_worker,
             install_ai_dependencies,
             install_model_package,
             verify_model_package,

@@ -18,6 +18,7 @@ pub struct JobRecord {
     pub output_path: Option<String>,
     pub scenario: String,
     pub created_at: String,
+    pub provenance: Option<serde_json::Value>,
 }
 
 pub fn migrate(connection: &Connection) -> Result<(), String> {
@@ -51,6 +52,9 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
 }
 
 fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
+    let provenance = row
+        .get::<_, Option<String>>(13)?
+        .and_then(|value| serde_json::from_str(&value).ok());
     Ok(JobRecord {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -65,10 +69,11 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
         output_path: row.get(10)?,
         scenario: row.get(11)?,
         created_at: row.get(12)?,
+        provenance,
     })
 }
 
-const SELECT_JOB: &str = "SELECT id, title, artist, audio_file, model, difficulty, status, progress, stage, error_message, output_path, scenario, created_at FROM jobs";
+const SELECT_JOB: &str = "SELECT id, title, artist, audio_file, model, difficulty, status, progress, stage, error_message, output_path, scenario, created_at, result_json FROM jobs";
 
 pub fn insert(
     connection: &Connection,
@@ -121,6 +126,17 @@ pub fn get_input(connection: &Connection, id: &str) -> Result<Option<StartJobInp
         .transpose()
 }
 
+pub fn active_ids(connection: &Connection) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare("SELECT id FROM jobs WHERE status IN ('running', 'queued')")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn update_state(
     connection: &Connection,
@@ -137,6 +153,21 @@ pub fn update_state(
             "UPDATE jobs SET status = ?2, progress = ?3, stage = ?4, error_message = ?5,
              output_path = COALESCE(?6, output_path), worker_pid = ?7, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![id, status, progress, stage, error_message, output_path, worker_pid],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub fn save_provenance(
+    connection: &Connection,
+    id: &str,
+    provenance: &serde_json::Value,
+) -> Result<(), String> {
+    let json = serde_json::to_string(provenance).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "UPDATE jobs SET result_json = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![id, json],
         )
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -201,12 +232,34 @@ mod tests {
             title: "Test Track".into(),
             artist: "Test Artist".into(),
             audio_file: "C:\\Music\\test.mp3".into(),
-            model: "Mock".into(),
+            model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 4.5,
+            gamemode: 0,
+            seed: 12345,
+            descriptors: vec![],
+            negative_descriptors: vec![],
+            reference_beatmap: None,
+            approach_rate: Some(9.0),
+            circle_size: Some(4.0),
+            hitsounded: true,
             scenario: "success".into(),
         };
         let created = insert(&connection, "BF-TEST", &input).expect("job is inserted");
         assert_eq!(created.status, "queued");
+        assert!(created.provenance.is_none());
+        let provenance = serde_json::json!({
+            "schema_version": 1,
+            "reproduction_key": "same-input-settings"
+        });
+        save_provenance(&connection, "BF-TEST", &provenance).unwrap();
+        assert_eq!(
+            get(&connection, "BF-TEST")
+                .unwrap()
+                .unwrap()
+                .provenance
+                .unwrap()["reproduction_key"],
+            "same-input-settings"
+        );
         assert_eq!(list(&connection).expect("jobs load").len(), 1);
     }
 
@@ -218,12 +271,22 @@ mod tests {
             title: "Test".into(),
             artist: "Artist".into(),
             audio_file: "test.wav".into(),
-            model: "Mock".into(),
+            model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 3.0,
+            gamemode: 0,
+            seed: 12345,
+            descriptors: vec![],
+            negative_descriptors: vec![],
+            reference_beatmap: None,
+            approach_rate: Some(9.0),
+            circle_size: Some(4.0),
+            hitsounded: true,
             scenario: "hang".into(),
         };
         insert(&connection, "BF-TEST", &input).expect("job is inserted");
+        assert_eq!(active_ids(&connection).unwrap(), vec!["BF-TEST"]);
         mark_interrupted(&connection).expect("recovery succeeds");
+        assert!(active_ids(&connection).unwrap().is_empty());
         assert_eq!(
             get(&connection, "BF-TEST").unwrap().unwrap().status,
             "interrupted"

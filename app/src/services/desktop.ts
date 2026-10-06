@@ -14,6 +14,7 @@ import type {
   RuntimeInfo,
   StartJobInput,
   SystemInfo,
+  WorkerHealth,
 } from '@/types'
 
 export function isDesktopRuntime() {
@@ -25,7 +26,17 @@ export async function selectAudioFile(): Promise<string | null> {
   const selected = await open({
     multiple: false,
     directory: false,
-    filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'flac'] }],
+    filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'flac'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function selectBeatmapFile(): Promise<string | null> {
+  if (!isDesktopRuntime()) return null
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: 'osu! beatmap', extensions: ['osu'] }],
   })
   return typeof selected === 'string' ? selected : null
 }
@@ -98,6 +109,10 @@ export async function removeModelPackage(packageId: string) {
 
 export async function diagnoseAiEnvironment() {
   return invoke<EnvironmentDiagnostics>('diagnose_ai_environment')
+}
+
+export async function diagnoseProductionWorker() {
+  return invoke<WorkerHealth>('diagnose_production_worker')
 }
 
 export async function installAiDependencies(backend: ComputeBackend) {

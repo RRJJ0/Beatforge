@@ -86,6 +86,15 @@ async function runAction(action: () => Promise<void>, success?: string) {
           <div v-else class="job-stage">{{ job.stage }}</div>
           <div v-if="job.errorMessage" class="job-error">{{ job.errorMessage }}</div>
           <div v-if="job.outputPath" class="job-output mono">{{ job.outputPath }}</div>
+          <div v-if="job.provenance" class="job-provenance">
+            <span class="mono">Run {{ job.provenance.reproduction_key.slice(0, 12) }}</span>
+            <span>{{ job.provenance.runtime.gpu_name ?? job.provenance.runtime.device }}</span>
+            <span>{{ job.provenance.runtime.precision.toUpperCase() }}</span>
+            <span>{{ job.provenance.timing.elapsed_seconds.toFixed(1) }}s</span>
+            <span v-if="job.provenance.runtime.peak_gpu_memory_mb">
+              Peak {{ job.provenance.runtime.peak_gpu_memory_mb.toFixed(0) }} MB
+            </span>
+          </div>
         </div>
         <div class="job-actions">
           <NButton
@@ -199,6 +208,17 @@ async function runAction(action: () => Promise<void>, success?: string) {
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.job-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 9px;
+  color: #858da0;
+  font-size: 9px;
+}
+.job-provenance span:first-child {
+  color: #ff66aa;
 }
 .job-actions {
   display: grid;

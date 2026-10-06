@@ -97,18 +97,30 @@ const backendOptions = [
 const diagnosticItems = computed(() => {
   const data = environmentStore.diagnostics
   if (!data) return []
-  return [
+  const items = [
     { name: 'Python', ...data.python },
     { name: 'pip', ...data.pip },
     { name: 'FFmpeg', ...data.ffmpeg },
     { name: 'PyTorch', ...data.pytorch },
+    { name: 'Mapperatorinator', ...data.mapperatorinator },
+    { name: 'Inference lock', ...data.inferenceDependencies },
   ]
+  if (environmentStore.workerHealth) {
+    items.push({
+      name: 'Production worker',
+      installed: environmentStore.workerHealth.ready,
+      version: `protocol ${environmentStore.workerHealth.protocolVersion} · worker ${environmentStore.workerHealth.workerVersion}`,
+      path: environmentStore.workerHealth.pythonExecutable,
+      error: environmentStore.workerHealth.errors.join('; ') || undefined,
+    })
+  }
+  return items
 })
 
 async function installDependencies() {
   try {
     await environmentStore.install(selectedBackend.value)
-    message.success('PyTorch and FFmpeg are ready.')
+    message.success('The Mapperatorinator environment is ready.')
   } catch {
     message.error(environmentStore.error || 'Dependency installation failed.')
   }
@@ -120,6 +132,19 @@ async function installRuntime() {
     message.success('Private Python runtime is ready.')
   } catch {
     message.error(packageStore.error || 'Python runtime installation failed.')
+  }
+}
+
+async function checkWorker() {
+  try {
+    await environmentStore.checkWorker()
+    if (environmentStore.workerHealth?.ready) {
+      message.success('Production worker health check passed.')
+    } else {
+      message.warning('Production worker reported missing components.')
+    }
+  } catch {
+    message.error(environmentStore.error || 'Production worker health check failed.')
   }
 }
 
@@ -249,7 +274,7 @@ onMounted(async () => {
           :disabled="runtime?.status !== 'installed' || environmentStore.installing"
           @click="installDependencies"
         >
-          {{ environmentStore.diagnostics?.ready ? 'Repair dependencies' : 'Install dependencies' }}
+          {{ environmentStore.diagnostics?.ready ? 'Repair environment' : 'Install environment' }}
         </NButton>
         <NButton
           secondary
@@ -258,6 +283,14 @@ onMounted(async () => {
           @click="environmentStore.refresh"
         >
           Diagnose
+        </NButton>
+        <NButton
+          secondary
+          :loading="environmentStore.healthChecking"
+          :disabled="runtime?.status !== 'installed' || environmentStore.installing"
+          @click="checkWorker"
+        >
+          Worker health
         </NButton>
       </div>
     </div>
@@ -280,6 +313,13 @@ onMounted(async () => {
     </div>
     <NAlert v-if="environmentStore.error" type="error" class="runtime-error">
       {{ environmentStore.error }}
+    </NAlert>
+    <NAlert
+      v-if="environmentStore.workerHealth && !environmentStore.workerHealth.ready"
+      type="warning"
+      class="runtime-error"
+    >
+      {{ environmentStore.workerHealth.errors.join(' · ') }}
     </NAlert>
   </NCard>
   <NCard class="storage-banner panel-card" :bordered="false">
@@ -375,12 +415,12 @@ onMounted(async () => {
 }
 .environment-actions {
   display: grid;
-  grid-template-columns: 140px auto auto;
+  grid-template-columns: 140px auto auto auto;
   gap: 8px;
 }
 .diagnostic-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 16px;
 }

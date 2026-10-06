@@ -38,7 +38,7 @@ const outputPath = ref(savedSettings.outputPath ?? '')
 const tempPath = ref(savedSettings.tempPath ?? '')
 const osuPath = ref(savedSettings.osuPath ?? '')
 const device = ref(savedSettings.device ?? 'cuda')
-const precision = ref(savedSettings.precision ?? 'fp16')
+const precision = ref(savedSettings.precision === 'fp16' ? 'bf16' : (savedSettings.precision ?? 'bf16'))
 const workers = ref(savedSettings.workers ?? 2)
 const autoImport = ref(savedSettings.autoImport ?? true)
 const keepIntermediate = ref(savedSettings.keepIntermediate ?? false)
@@ -55,7 +55,7 @@ onMounted(async () => {
     tempPath.value = settings.tempPath
     osuPath.value = settings.osuPath
     device.value = settings.device
-    precision.value = settings.precision
+    precision.value = settings.precision === 'fp16' ? 'bf16' : settings.precision
     workers.value = settings.workers
     autoImport.value = settings.autoImport
     keepIntermediate.value = settings.keepIntermediate
@@ -202,7 +202,7 @@ async function saveSettings() {
               ><NSelect
                 v-model:value="precision"
                 :options="[
-                  { label: 'FP16 · Faster', value: 'fp16' },
+                  { label: 'BF16 · Recommended', value: 'bf16' },
                   { label: 'FP32 · Compatible', value: 'fp32' },
                 ]"
             /></NFormItem>
@@ -211,7 +211,8 @@ async function saveSettings() {
             /></NFormItem>
           </div>
           <NAlert type="info" :show-icon="false"
-            >FP16 is recommended for your RTX 4070 and uses less VRAM.</NAlert
+            >BF16 is the native precision for Mapperatorinator V32. Unsupported GPUs fall back
+            safely to FP32.</NAlert
           >
         </NForm>
       </NCard>

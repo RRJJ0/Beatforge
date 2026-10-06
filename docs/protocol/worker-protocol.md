@@ -9,7 +9,7 @@ Beatforge desktop core and generation workers communicate over JSON Lines. Each 
 - Unknown versions, malformed JSON, and events for the wrong job terminate the worker.
 - The desktop core starts one worker at a time and writes exactly one `start_job` command to stdin.
 - Progress events reset the worker inactivity timeout.
-- Cancellation is performed by the desktop core terminating the subprocess and waiting for it to exit.
+- Cancellation is requested with a versioned `cancel_job` frame. Rust waits briefly for a graceful exit, then terminates and reaps the process tree.
 
 ## Start job
 
@@ -18,6 +18,8 @@ Beatforge desktop core and generation workers communicate over JSON Lines. Each 
 ```
 
 `scenario` is part of the phase 3 mock worker only. Supported values are `success`, `failure`, `oom`, `hang`, `crash`, and `malformed`.
+
+Production commands use snake-case protocol fields and contain only adapter-approved absolute paths, the pinned source/model identities, detected GPU metadata, and a whitelisted `config` object. Vue cannot supply a checkpoint or output path.
 
 ## Progress
 
@@ -28,8 +30,10 @@ Beatforge desktop core and generation workers communicate over JSON Lines. Each 
 ## Completed
 
 ```json
-{"type":"completed","protocol_version":1,"job_id":"BF-123","output_path":"C:\\...\\mock-result.json","warnings":["Mock worker output; not a playable beatmap"]}
+{"type":"completed","protocol_version":1,"job_id":"BF-123","output_path":"C:\\...\\result.osz","warnings":[],"provenance":{"schema_version":1,"job_id":"BF-123","reproduction_key":"sha256...","source":{"mapperatorinator_commit":"0e2b...","worker_version":"1","protocol_version":1},"model":{"package":"mapperatorinator-v32-standard","version":"32..."},"runtime":{"pytorch_version":"2.10.0+cu128","cuda_runtime":"12.8","device":"cuda","precision":"fp32"},"parameters":{"seed":12345},"input":{"audio":{"sha256":"..."}},"output":{"sha256":"..."},"timing":{"elapsed_seconds":123.4},"known_limitations":["osu!standard only"]}}
 ```
+
+`provenance` is required for the production worker and omitted by the mock worker. Rust stores it in the job's existing `result_json` column before changing the job to `completed`. A missing or unpersistable production record is a terminal protocol failure.
 
 ## Failed
 

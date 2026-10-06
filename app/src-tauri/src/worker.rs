@@ -1,26 +1,37 @@
 use crate::{
-    build_paths, jobs, open_database,
+    build_paths, formal_worker, jobs, open_database,
     protocol::{
-        PROTOCOL_VERSION, StartJobInput, WorkerEvent, WorkerStartCommand, parse_worker_event,
+        PROTOCOL_VERSION, StartJobInput, WorkerCancelCommand, WorkerEvent, WorkerStartCommand,
+        parse_worker_event,
     },
 };
 use std::{
     collections::VecDeque,
     fs::OpenOptions,
-    io::{BufRead, BufReader, Write},
-    process::{Child, Command, Stdio},
+    io::{self, BufRead, BufReader, Read, Write},
+    path::{Path, PathBuf},
+    process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     thread,
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter};
 
-const WORKER_TIMEOUT: Duration = Duration::from_secs(8);
+const MOCK_WORKER_TIMEOUT: Duration = Duration::from_secs(8);
+const PRODUCTION_WORKER_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 
 enum ManagerCommand {
-    Enqueue { id: String, input: StartJobInput },
-    Cancel { id: String },
-    Shutdown { acknowledged: Sender<()> },
+    Enqueue {
+        id: String,
+        input: Box<StartJobInput>,
+    },
+    Cancel {
+        id: String,
+    },
+    Shutdown {
+        acknowledged: Sender<()>,
+    },
 }
 
 pub struct WorkerManager {
@@ -36,7 +47,10 @@ impl WorkerManager {
 
     pub fn enqueue(&self, id: String, input: StartJobInput) -> Result<(), String> {
         self.sender
-            .send(ManagerCommand::Enqueue { id, input })
+            .send(ManagerCommand::Enqueue {
+                id,
+                input: Box::new(input),
+            })
             .map_err(|_| "Worker manager is not available".into())
     }
 
@@ -53,7 +67,7 @@ impl WorkerManager {
             .send(ManagerCommand::Shutdown { acknowledged })
             .is_ok()
         {
-            let _ = receiver.recv_timeout(Duration::from_secs(3));
+            let _ = receiver.recv_timeout(Duration::from_secs(6));
         }
     }
 }
@@ -61,9 +75,103 @@ impl WorkerManager {
 struct ActiveWorker {
     id: String,
     child: Child,
+    stdin: Option<ChildStdin>,
     events: Receiver<Result<WorkerEvent, String>>,
     last_event: Instant,
+    timeout: Duration,
     terminal_event_received: bool,
+    cleanup_on_exit: bool,
+    production: bool,
+}
+
+fn drain_worker_stderr<R: Read>(mut stderr: R, log_path: &Path) {
+    match OpenOptions::new().create(true).append(true).open(log_path) {
+        Ok(mut log) => {
+            let _ = io::copy(&mut stderr, &mut log);
+        }
+        Err(_) => {
+            // Never close the child's stderr pipe just because logging failed.
+            // A closed pipe can turn an otherwise successful Python shutdown
+            // into exit code 120 while it flushes its standard streams.
+            let _ = io::copy(&mut stderr, &mut io::sink());
+        }
+    }
+}
+
+fn remove_managed_job_directory(jobs_root: &Path, id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id == "."
+        || id == ".."
+        || id.contains(['/', '\\'])
+        || Path::new(id).components().count() != 1
+    {
+        return Err("Refusing to clean an invalid job id".into());
+    }
+    let target = jobs_root.join(id);
+    if !target.exists() {
+        return Ok(());
+    }
+    let root = jobs_root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve jobs directory: {error}"))?;
+    let resolved = target
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve job directory: {error}"))?;
+    if resolved.parent() != Some(root.as_path()) {
+        return Err("Refusing to clean a job directory outside the managed root".into());
+    }
+    std::fs::remove_dir_all(&resolved)
+        .map_err(|error| format!("Failed to clean job temporary files: {error}"))
+}
+
+pub(crate) fn cleanup_job_artifacts(app: &AppHandle, id: &str) -> Result<(), String> {
+    let paths = build_paths(app)?;
+    remove_managed_job_directory(&PathBuf::from(paths.jobs), id)
+}
+
+fn wait_for_exit(child: &mut Child, timeout: Duration) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < timeout {
+        if child.try_wait().is_ok_and(|status| status.is_some()) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+fn force_stop_process_tree(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut taskkill = Command::new("taskkill");
+        taskkill
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .creation_flags(0x0800_0000)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = taskkill.status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn stop_worker(active: &mut ActiveWorker) {
+    if let Some(mut stdin) = active.stdin.take() {
+        let cancel = WorkerCancelCommand {
+            protocol_version: PROTOCOL_VERSION,
+            message_type: "cancel_job",
+            job_id: active.id.clone(),
+        };
+        if let Ok(cancel) = serde_json::to_string(&cancel) {
+            let _ = writeln!(stdin, "{cancel}");
+        }
+        let _ = stdin.flush();
+    }
+    if !wait_for_exit(&mut active.child, GRACEFUL_STOP_TIMEOUT) {
+        force_stop_process_tree(&mut active.child);
+    }
 }
 
 fn emit_job(app: &AppHandle, id: &str) {
@@ -102,42 +210,55 @@ fn update_job(
 
 fn spawn_worker(app: &AppHandle, id: String, input: StartJobInput) -> Result<ActiveWorker, String> {
     let paths = build_paths(app)?;
-    let output_directory = std::path::PathBuf::from(&paths.jobs).join(&id);
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let mut command = Command::new(executable);
-    command
-        .arg("--mock-worker")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
+    let production = input.scenario == "success";
+    let (mut command, start_line, timeout) = if production {
+        let python = crate::installed_python(app)?.ok_or_else(|| {
+            "Install the private Python runtime before starting inference".to_string()
+        })?;
+        let start_command = crate::build_production_request(app, &id, &input)?;
+        let runtime_root = std::path::PathBuf::from(&paths.runtime);
+        let process = formal_worker::production_process(&python, &runtime_root)?;
+        let line = serde_json::to_string(&start_command).map_err(|error| error.to_string())?;
+        (process, line, PRODUCTION_WORKER_TIMEOUT)
+    } else {
+        let output_directory = std::path::PathBuf::from(&paths.jobs).join(&id);
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let mut process = Command::new(executable);
+        process
+            .arg("--mock-worker")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            process.creation_flags(0x0800_0000);
+        }
+        let start_command = WorkerStartCommand {
+            protocol_version: PROTOCOL_VERSION,
+            message_type: "start_job".into(),
+            job_id: id.clone(),
+            audio_path: input.audio_file.clone(),
+            output_path: output_directory.to_string_lossy().into_owned(),
+            title: input.title.clone(),
+            artist: input.artist.clone(),
+            model: input.model.clone(),
+            difficulty: input.difficulty,
+            scenario: input.scenario.clone(),
+        };
+        let line = serde_json::to_string(&start_command).map_err(|error| error.to_string())?;
+        (process, line, MOCK_WORKER_TIMEOUT)
+    };
     let mut child = command
         .spawn()
         .map_err(|error| format!("Failed to start worker: {error}"))?;
     let pid = child.id();
-    let start_command = WorkerStartCommand {
-        protocol_version: PROTOCOL_VERSION,
-        message_type: "start_job".into(),
-        job_id: id.clone(),
-        audio_path: input.audio_file.clone(),
-        output_path: output_directory.to_string_lossy().into_owned(),
-        title: input.title,
-        artist: input.artist,
-        model: input.model,
-        difficulty: input.difficulty,
-        scenario: input.scenario,
-    };
-    let start_line = serde_json::to_string(&start_command).map_err(|error| error.to_string())?;
     let mut stdin = child
         .stdin
         .take()
         .ok_or_else(|| "Worker stdin is unavailable".to_string())?;
     writeln!(stdin, "{start_line}").map_err(|error| error.to_string())?;
-    drop(stdin);
+    stdin.flush().map_err(|error| error.to_string())?;
 
     let stdout = child
         .stdout
@@ -160,20 +281,18 @@ fn spawn_worker(app: &AppHandle, id: String, input: StartJobInput) -> Result<Act
         .take()
         .ok_or_else(|| "Worker stderr is unavailable".to_string())?;
     let log_path = std::path::PathBuf::from(paths.logs).join(format!("job-{id}.log"));
-    thread::spawn(move || {
-        if let Ok(mut log) = OpenOptions::new().create(true).append(true).open(log_path) {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                let _ = writeln!(log, "{line}");
-            }
-        }
-    });
+    thread::spawn(move || drain_worker_stderr(stderr, &log_path));
 
     update_job(
         app,
         &id,
         "running",
         0,
-        "Starting worker",
+        if production {
+            "Starting Mapperatorinator"
+        } else {
+            "Starting mock worker"
+        },
         None,
         None,
         Some(pid),
@@ -181,22 +300,29 @@ fn spawn_worker(app: &AppHandle, id: String, input: StartJobInput) -> Result<Act
     Ok(ActiveWorker {
         id,
         child,
+        stdin: Some(stdin),
         events,
         last_event: Instant::now(),
+        timeout,
         terminal_event_received: false,
+        cleanup_on_exit: false,
+        production,
     })
 }
 
 fn fail_active(app: &AppHandle, active: &mut ActiveWorker, code: &str, message: &str) {
-    let _ = active.child.kill();
-    let _ = active.child.wait();
+    stop_worker(active);
+    let cleanup_error = cleanup_job_artifacts(app, &active.id).err();
+    let message = cleanup_error
+        .map(|error| format!("{message} Temporary cleanup also failed: {error}"))
+        .unwrap_or_else(|| message.to_string());
     update_job(
         app,
         &active.id,
         "failed",
         0,
         code,
-        Some(message),
+        Some(&message),
         None,
         None,
     );
@@ -237,8 +363,32 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
         WorkerEvent::Completed {
             output_path,
             warnings,
+            provenance,
             ..
         } => {
+            if active.production && provenance.is_none() {
+                fail_active(
+                    app,
+                    active,
+                    "PROVENANCE_MISSING",
+                    "The production worker completed without a reproducibility record",
+                );
+                return true;
+            }
+            if let Some(provenance) = provenance {
+                let saved = open_database(app).and_then(|(connection, _)| {
+                    jobs::save_provenance(&connection, &active.id, &provenance)
+                });
+                if let Err(error) = saved {
+                    fail_active(
+                        app,
+                        active,
+                        "PROVENANCE_SAVE_FAILED",
+                        &format!("Could not save the reproducibility record: {error}"),
+                    );
+                    return true;
+                }
+            }
             let stage = if warnings.is_empty() {
                 "Completed".into()
             } else {
@@ -255,6 +405,7 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
                 None,
             );
             active.terminal_event_received = true;
+            active.cleanup_on_exit = false;
             true
         }
         WorkerEvent::Failed {
@@ -263,6 +414,21 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
             recoverable,
             ..
         } => {
+            if code == "JOB_CANCELLED" {
+                update_job(
+                    app,
+                    &active.id,
+                    "cancelled",
+                    0,
+                    "Cancelled",
+                    None,
+                    None,
+                    None,
+                );
+                active.terminal_event_received = true;
+                active.cleanup_on_exit = true;
+                return true;
+            }
             let stage = if recoverable {
                 format!("{code} · Retry available")
             } else {
@@ -279,6 +445,7 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
                 None,
             );
             active.terminal_event_received = true;
+            active.cleanup_on_exit = true;
             true
         }
     }
@@ -290,33 +457,34 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
 
     loop {
         match receiver.recv_timeout(Duration::from_millis(50)) {
-            Ok(ManagerCommand::Enqueue { id, input }) => pending.push_back((id, input)),
+            Ok(ManagerCommand::Enqueue { id, input }) => pending.push_back((id, *input)),
             Ok(ManagerCommand::Cancel { id }) => {
                 if let Some(position) = pending.iter().position(|(pending_id, _)| pending_id == &id)
                 {
                     pending.remove(position);
+                    let cleanup_error = cleanup_job_artifacts(&app, &id).err();
                     update_job(
                         &app,
                         &id,
                         "cancelled",
                         0,
                         "Cancelled before start",
-                        None,
+                        cleanup_error.as_deref(),
                         None,
                         None,
                     );
                 } else if active.as_ref().is_some_and(|worker| worker.id == id)
                     && let Some(mut worker) = active.take()
                 {
-                    let _ = worker.child.kill();
-                    let _ = worker.child.wait();
+                    stop_worker(&mut worker);
+                    let cleanup_error = cleanup_job_artifacts(&app, &id).err();
                     update_job(
                         &app,
                         &id,
                         "cancelled",
                         0,
                         "Worker cancelled",
-                        None,
+                        cleanup_error.as_deref(),
                         None,
                         None,
                     );
@@ -324,27 +492,32 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
             }
             Ok(ManagerCommand::Shutdown { acknowledged }) => {
                 if let Some(mut worker) = active.take() {
-                    let _ = worker.child.kill();
-                    let _ = worker.child.wait();
+                    stop_worker(&mut worker);
+                    let cleanup_error = cleanup_job_artifacts(&app, &worker.id).err();
                     update_job(
                         &app,
                         &worker.id,
                         "interrupted",
                         0,
                         "Application is shutting down",
-                        Some("Worker interrupted by application shutdown"),
+                        cleanup_error
+                            .as_deref()
+                            .or(Some("Worker interrupted by application shutdown")),
                         None,
                         None,
                     );
                 }
                 for (id, _) in pending.drain(..) {
+                    let cleanup_error = cleanup_job_artifacts(&app, &id).err();
                     update_job(
                         &app,
                         &id,
                         "interrupted",
                         0,
                         "Application is shutting down",
-                        Some("Queued job interrupted by application shutdown"),
+                        cleanup_error
+                            .as_deref()
+                            .or(Some("Queued job interrupted by application shutdown")),
                         None,
                         None,
                     );
@@ -361,16 +534,22 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
         {
             match spawn_worker(&app, id.clone(), input) {
                 Ok(worker) => active = Some(worker),
-                Err(error) => update_job(
-                    &app,
-                    &id,
-                    "failed",
-                    0,
-                    "WORKER_START_FAILED",
-                    Some(&error),
-                    None,
-                    None,
-                ),
+                Err(error) => {
+                    let cleanup_error = cleanup_job_artifacts(&app, &id).err();
+                    let message = cleanup_error
+                        .map(|cleanup| format!("{error} Temporary cleanup also failed: {cleanup}"))
+                        .unwrap_or(error);
+                    update_job(
+                        &app,
+                        &id,
+                        "failed",
+                        0,
+                        "WORKER_START_FAILED",
+                        Some(&message),
+                        None,
+                        None,
+                    );
+                }
             }
         }
 
@@ -386,7 +565,7 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
                     }
                 }
             }
-            if !worker.terminal_event_received && worker.last_event.elapsed() > WORKER_TIMEOUT {
+            if !worker.terminal_event_received && worker.last_event.elapsed() > worker.timeout {
                 fail_active(
                     &app,
                     worker,
@@ -414,6 +593,7 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
                         }
                     }
                     if !worker.terminal_event_received {
+                        worker.cleanup_on_exit = true;
                         update_job(
                             &app,
                             &worker.id,
@@ -435,7 +615,47 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
             }
         }
         if finished {
+            if let Some(worker) = active.as_ref()
+                && worker.cleanup_on_exit
+            {
+                let _ = cleanup_job_artifacts(&app, &worker.id);
+            }
             active = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{drain_worker_stderr, remove_managed_job_directory};
+    use std::{fs, time::SystemTime};
+
+    #[test]
+    fn stderr_logging_preserves_non_utf8_progress_bytes() {
+        let suffix = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("beatforge-stderr-{suffix}.log"));
+        let bytes = b"Generating timing\r\x81\x40 progress\r100%\n";
+        drain_worker_stderr(&bytes[..], &path);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cleanup_removes_only_a_direct_managed_job_directory() {
+        let suffix = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("beatforge-job-cleanup-{suffix}"));
+        let job = root.join("BF-TEST");
+        fs::create_dir_all(&job).unwrap();
+        fs::write(job.join("partial.tmp"), b"partial").unwrap();
+        remove_managed_job_directory(&root, "BF-TEST").unwrap();
+        assert!(!job.exists());
+        assert!(remove_managed_job_directory(&root, "../outside").is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 }

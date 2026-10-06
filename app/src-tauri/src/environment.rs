@@ -1,3 +1,4 @@
+use crate::mapperatorinator;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -54,6 +55,8 @@ pub struct EnvironmentDiagnostics {
     pub pip: ComponentDiagnostic,
     pub ffmpeg: ComponentDiagnostic,
     pub pytorch: ComponentDiagnostic,
+    pub mapperatorinator: ComponentDiagnostic,
+    pub inference_dependencies: ComponentDiagnostic,
     pub gpu_name: Option<String>,
     pub driver_version: Option<String>,
     pub cuda_available: bool,
@@ -188,6 +191,7 @@ fn inspect_component(python: &Path, script: &str) -> ComponentDiagnostic {
 
 pub fn diagnose(
     python: Option<&Path>,
+    runtime_root: Option<&Path>,
     gpu_name: Option<String>,
     driver_version: Option<String>,
 ) -> EnvironmentDiagnostics {
@@ -200,6 +204,8 @@ pub fn diagnose(
             pip: missing(runtime_error),
             ffmpeg: missing(runtime_error),
             pytorch: missing(runtime_error),
+            mapperatorinator: missing(runtime_error),
+            inference_dependencies: missing(runtime_error),
             gpu_name,
             driver_version,
             cuda_available: false,
@@ -234,11 +240,33 @@ pub fn diagnose(
         ],
     )
     .is_ok_and(|value| value == "true");
+    let (mapperatorinator, inference_dependencies) = match runtime_root
+        .ok_or_else(|| "Application runtime path is unavailable".to_string())
+        .and_then(|root| mapperatorinator::inspect(python, root))
+    {
+        Ok(info) => (
+            ComponentDiagnostic {
+                installed: true,
+                version: Some(info.source_version),
+                path: Some(info.source_path.to_string_lossy().into_owned()),
+                error: None,
+            },
+            ComponentDiagnostic {
+                installed: true,
+                version: Some(info.dependency_version),
+                path: None,
+                error: None,
+            },
+        ),
+        Err(error) => (missing(error.clone()), missing(error)),
+    };
     let expects_cuda = pytorch.path.as_deref().is_some_and(|value| value != "cpu");
     let ready = python_info.installed
         && pip.installed
         && ffmpeg.installed
         && pytorch.installed
+        && mapperatorinator.installed
+        && inference_dependencies.installed
         && (!expects_cuda || cuda_available);
 
     EnvironmentDiagnostics {
@@ -246,6 +274,8 @@ pub fn diagnose(
         pip,
         ffmpeg,
         pytorch,
+        mapperatorinator,
+        inference_dependencies,
         gpu_name,
         driver_version,
         cuda_available,
@@ -266,6 +296,10 @@ fn emit(app: &AppHandle, stage: &str, progress: u8, message: impl Into<String>) 
     );
 }
 
+pub fn emit_install_event(app: &AppHandle, stage: &str, progress: u8, message: &str) {
+    emit(app, stage, progress, message);
+}
+
 fn run_checked(python: &Path, args: &[&str], label: &str) -> Result<(), String> {
     run_python(python, args)
         .map(|_| ())
@@ -280,11 +314,11 @@ pub fn install_dependencies(
     emit(
         app,
         "preparing",
-        5,
+        2,
         "Checking the private Python environment",
     );
     if run_python(python, &["-I", "-m", "pip", "--version"]).is_err() {
-        emit(app, "pip", 10, "Bootstrapping pip");
+        emit(app, "pip", 5, "Bootstrapping pip");
         run_checked(
             python,
             &["-I", "-m", "ensurepip", "--upgrade"],
@@ -292,7 +326,7 @@ pub fn install_dependencies(
         )?;
     }
 
-    emit(app, "ffmpeg", 20, "Installing the managed FFmpeg binary");
+    emit(app, "ffmpeg", 8, "Installing the managed FFmpeg binary");
     let ffmpeg_requirement = format!("imageio-ffmpeg=={FFMPEG_PACKAGE_VERSION}");
     run_checked(
         python,
@@ -312,7 +346,7 @@ pub fn install_dependencies(
     emit(
         app,
         "pytorch",
-        45,
+        20,
         format!(
             "Installing PyTorch {PYTORCH_VERSION} for {}",
             backend.label()
@@ -338,7 +372,7 @@ pub fn install_dependencies(
         "PyTorch installation",
     )?;
 
-    emit(app, "verifying", 90, "Verifying PyTorch and FFmpeg");
+    emit(app, "verifying", 42, "Verifying PyTorch and FFmpeg");
     run_checked(
         python,
         &[
@@ -348,7 +382,7 @@ pub fn install_dependencies(
         ],
         "Dependency verification",
     )?;
-    emit(app, "completed", 100, "AI dependencies are ready");
+    emit(app, "core_ready", 48, "Core AI dependencies are ready");
     Ok(())
 }
 

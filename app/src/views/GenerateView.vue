@@ -5,6 +5,7 @@ import {
   NAlert,
   NButton,
   NCard,
+  NDynamicTags,
   NForm,
   NFormItem,
   NIcon,
@@ -18,12 +19,13 @@ import {
 } from 'naive-ui'
 import {
   CloudUploadOutline,
+  DocumentAttachOutline,
   MusicalNotesOutline,
   PlayOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
-import { isDesktopRuntime, selectAudioFile } from '@/services/desktop'
+import { isDesktopRuntime, selectAudioFile, selectBeatmapFile } from '@/services/desktop'
 
 const router = useRouter()
 const message = useMessage()
@@ -31,7 +33,7 @@ const jobsStore = useJobsStore()
 const audioFile = ref('')
 const title = ref('')
 const artist = ref('')
-const model = ref('standard')
+const model = ref('mapperatorinator-v32-standard')
 const difficulty = ref(4.8)
 const approachRate = ref(9)
 const circleSize = ref(4)
@@ -40,23 +42,27 @@ const isAdvanced = ref(false)
 const attempted = ref(false)
 const creating = ref(false)
 const scenario = ref('success')
+const seed = ref(Math.floor(Math.random() * 65_536))
+const descriptors = ref<string[]>([])
+const negativeDescriptors = ref<string[]>([])
+const referenceBeatmap = ref('')
 
 const modelOptions = [
-  { label: 'Mapperatorinator Standard · v1.3', value: 'standard' },
-  { label: 'Mapperatorinator High SR · v1.1', value: 'high-sr' },
+  { label: 'Mapperatorinator V32 · osu!standard', value: 'mapperatorinator-v32-standard' },
 ]
 const scenarioOptions = [
-  { label: 'Success', value: 'success' },
-  { label: 'Generation failure', value: 'failure' },
-  { label: 'CUDA out of memory', value: 'oom' },
-  { label: 'Worker timeout', value: 'hang' },
-  { label: 'Unexpected process exit', value: 'crash' },
-  { label: 'Malformed protocol message', value: 'malformed' },
+  { label: 'Production inference', value: 'success' },
+  { label: 'Simulate generation failure', value: 'failure' },
+  { label: 'Simulate CUDA out of memory', value: 'oom' },
+  { label: 'Simulate worker timeout', value: 'hang' },
+  { label: 'Simulate unexpected process exit', value: 'crash' },
+  { label: 'Simulate malformed protocol message', value: 'malformed' },
 ]
 const canGenerate = computed(() =>
   Boolean(audioFile.value && title.value.trim() && artist.value.trim()),
 )
 const audioDisplayName = computed(() => audioFile.value.split(/[\\/]/).at(-1) ?? '')
+const referenceDisplayName = computed(() => referenceBeatmap.value.split(/[\\/]/).at(-1) ?? '')
 
 async function chooseAudio() {
   if (!isDesktopRuntime()) {
@@ -68,6 +74,15 @@ async function chooseAudio() {
   audioFile.value = selected
   const fileName = selected.split(/[\\/]/).at(-1) ?? selected
   if (!title.value) title.value = fileName.replace(/\.[^/.]+$/, '').replaceAll('-', ' ')
+}
+
+async function chooseReferenceBeatmap() {
+  if (!isDesktopRuntime()) {
+    message.info('Native file selection is available in the Tauri desktop app.')
+    return
+  }
+  const selected = await selectBeatmapFile()
+  if (selected) referenceBeatmap.value = selected
 }
 
 async function createJob() {
@@ -82,8 +97,16 @@ async function createJob() {
       title: title.value.trim(),
       artist: artist.value.trim(),
       audioFile: audioFile.value,
-      model: model.value === 'high-sr' ? 'Mapperatorinator High SR' : 'Mapperatorinator Standard',
+      model: model.value,
       difficulty: difficulty.value,
+      gamemode: 0,
+      seed: seed.value,
+      descriptors: descriptors.value,
+      negativeDescriptors: negativeDescriptors.value,
+      referenceBeatmap: referenceBeatmap.value || undefined,
+      approachRate: approachRate.value,
+      circleSize: circleSize.value,
+      hitsounded: generateHitsounds.value,
       scenario: scenario.value,
     })
     message.success('Worker job added to the queue.')
@@ -112,7 +135,7 @@ async function createJob() {
             <NIcon :component="audioFile ? MusicalNotesOutline : CloudUploadOutline" />
           </div>
           <strong>{{ audioDisplayName || 'Choose an audio file' }}</strong>
-          <p>{{ audioFile || 'Native file picker · MP3, WAV, OGG, FLAC' }}</p>
+          <p>{{ audioFile || 'Native file picker · MP3, WAV, OGG, M4A, FLAC' }}</p>
         </button>
         <NAlert
           v-if="attempted && !audioFile"
@@ -121,6 +144,16 @@ async function createJob() {
           :show-icon="false"
           >Select an audio file to continue.</NAlert
         >
+        <div class="reference-row">
+          <div>
+            <strong>Reference beatmap</strong>
+            <small>{{ referenceDisplayName || 'Optional · use an existing .osu as context' }}</small>
+          </div>
+          <NButton secondary @click="chooseReferenceBeatmap">
+            <template #icon><NIcon :component="DocumentAttachOutline" /></template>
+            {{ referenceBeatmap ? 'Change' : 'Choose .osu' }}
+          </NButton>
+        </div>
       </NCard>
 
       <NCard class="panel-card" :bordered="false">
@@ -176,10 +209,19 @@ async function createJob() {
             </div>
           </NFormItem>
           <div class="switch-row">
-            <div><strong>Advanced controls</strong><small>Adjust AR, CS, and hitsounds</small></div>
+            <div><strong>Advanced controls</strong><small>Seed, descriptors, AR, CS, and hitsounds</small></div>
             <NSwitch v-model:value="isAdvanced" />
           </div>
           <template v-if="isAdvanced">
+            <NFormItem label="Seed">
+              <NInputNumber v-model:value="seed" :min="0" :max="65535" :step="1" />
+            </NFormItem>
+            <NFormItem label="Descriptors">
+              <NDynamicTags v-model:value="descriptors" />
+            </NFormItem>
+            <NFormItem label="Negative descriptors">
+              <NDynamicTags v-model:value="negativeDescriptors" />
+            </NFormItem>
             <div class="two-column compact">
               <NFormItem label="Approach rate"
                 ><NInputNumber v-model:value="approachRate" :min="0" :max="10"
@@ -194,7 +236,7 @@ async function createJob() {
               </div>
               <NSwitch v-model:value="generateHitsounds" />
             </div>
-            <NFormItem label="Mock worker result">
+            <NFormItem label="Backend / test scenario">
               <NSelect v-model:value="scenario" :options="scenarioOptions" />
             </NFormItem>
           </template>
@@ -319,6 +361,27 @@ async function createJob() {
 .validation-alert {
   margin-top: 10px;
   font-size: 11px;
+}
+.reference-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.reference-row strong,
+.reference-row small {
+  display: block;
+}
+.reference-row strong {
+  font-size: 12px;
+}
+.reference-row small {
+  margin-top: 4px;
+  color: #858da0;
+  font-size: 10px;
 }
 @media (max-width: 1180px) {
   .generate-grid {

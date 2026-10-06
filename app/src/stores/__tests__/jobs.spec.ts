@@ -23,8 +23,13 @@ describe('jobs store', () => {
       title: 'Test Track',
       artist: 'Test Artist',
       audioFile: 'track.mp3',
-      model: 'Mapperatorinator Standard',
+      model: 'mapperatorinator-v32-standard',
       difficulty: 4.5,
+      gamemode: 0,
+      seed: 12345,
+      descriptors: [],
+      negativeDescriptors: [],
+      hitsounded: true,
       scenario: 'success',
     })
     expect(store.jobs).toHaveLength(initialCount + 1)

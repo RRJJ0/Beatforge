@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   diagnoseAiEnvironment,
+  diagnoseProductionWorker,
   installAiDependencies,
   isDesktopRuntime,
   onEnvironmentInstallEvent,
@@ -10,6 +11,7 @@ import type {
   ComputeBackend,
   EnvironmentDiagnostics,
   EnvironmentInstallEvent,
+  WorkerHealth,
 } from '@/types'
 
 export const useEnvironmentStore = defineStore('environment', () => {
@@ -18,6 +20,8 @@ export const useEnvironmentStore = defineStore('environment', () => {
   const installing = ref(false)
   const error = ref('')
   const installEvent = ref<EnvironmentInstallEvent>()
+  const workerHealth = ref<WorkerHealth>()
+  const healthChecking = ref(false)
   let listening = false
 
   async function initialize() {
@@ -51,7 +55,7 @@ export const useEnvironmentStore = defineStore('environment', () => {
     installEvent.value = {
       stage: 'preparing',
       progress: 0,
-      message: 'Preparing dependency installation',
+      message: 'Preparing Mapperatorinator environment installation',
     }
     try {
       diagnostics.value = await installAiDependencies(backend)
@@ -63,5 +67,31 @@ export const useEnvironmentStore = defineStore('environment', () => {
     }
   }
 
-  return { diagnostics, loading, installing, error, installEvent, initialize, refresh, install }
+  async function checkWorker() {
+    if (!isDesktopRuntime() || healthChecking.value || installing.value) return
+    healthChecking.value = true
+    error.value = ''
+    try {
+      workerHealth.value = await diagnoseProductionWorker()
+    } catch (reason) {
+      error.value = reason instanceof Error ? reason.message : String(reason)
+      throw reason
+    } finally {
+      healthChecking.value = false
+    }
+  }
+
+  return {
+    diagnostics,
+    workerHealth,
+    loading,
+    installing,
+    healthChecking,
+    error,
+    installEvent,
+    initialize,
+    refresh,
+    install,
+    checkWorker,
+  }
 })

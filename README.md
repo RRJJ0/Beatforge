@@ -448,6 +448,99 @@ MVP 鎖定官方 `OliBomby/Mapperatorinator-v32` repository 的 commit `74f22583
 
 目標：以正式 Python worker 完成第一個端到端 beatmap 生成。
 
+目前進度：
+
+- [x] 5.1：鎖定 Mapperatorinator 上游版本與整合邊界。
+- [x] 5.2：安裝 Mapperatorinator 原始碼與其固定 Python 依賴。
+- [x] 5.3：建立正式 Python worker bootstrap、health check 與 JSON Lines 通訊。
+- [x] 5.4：建立生成 request adapter、參數驗證與本機路徑解析。
+- [x] 5.5：接入真實推論流程、模型載入與階段進度回報。
+- [x] 5.6：錯誤分類、取消、GPU／subprocess／暫存資源清理。
+- [x] 5.7：生成 provenance、可重現性紀錄與端到端 GPU 驗收。
+
+子項目範圍：
+
+#### 5.1 上游版本與整合邊界
+
+- 固定 Mapperatorinator commit，不直接追蹤 `main`。
+- 記錄 source、模型、設定檔、授權及本專案 adapter 的版本關係。
+- 決定只透過 adapter 使用 inference API，不讓 Vue 或 Rust 依賴 Hydra CLI 細節。
+- 明確排除訓練、Web UI、MaiMod 與非 MVP gamemode。
+
+鎖定結果與 adapter 責任邊界記錄於 `docs/architecture/mapperatorinator-integration.md`；可由程式驗證的來源、模型 revision、archive checksum 與授權資訊記錄於 `app/src-tauri/resources/manifests/mapperatorinator-v32.lock.json`。
+
+#### 5.2 正式 Python 環境
+
+- 將固定版本原始碼安裝至 application-managed runtime。
+- 鎖定 requirements 與 transitive dependencies，避免啟動時臨時更新。
+- 處理 Git-based dependency，使空白 Windows 不需安裝系統 Git。
+- 驗證必要 module 可 import，且 Mapperatorinator source／dependency 版本一致。
+
+實作結果：AI environment 的安裝按鈕會先完成階段 4 的 PyTorch／FFmpeg，再下載具 SHA-256 驗證的 Mapperatorinator source archive，並將 source 安裝至 application data 下的版本化 runtime。Python 依賴使用 Windows x64／Python 3.10 專用 lock；41 個直接與遞迴套件全部固定版本及 artifact hash，pip 以 `--require-hashes --no-deps --no-build-isolation` 安裝，PyTorch／torchaudio 則繼續由 GPU backend 選擇器獨立管理。Hydra 所需的 `antlr4-python3-runtime==4.9.3` 只有 source distribution，因此不能全域限制為 wheel；它仍受版本與 archive hash 約束，且建置不會另開可下載未鎖套件的 isolation environment。
+
+上游 `slider @ git+https://...` 已改為固定 commit 的 HTTPS source archive，因此目標 Windows 不需要 Git。安裝器會保留 Mapperatorinator 與 slider 的授權 identity；slider 為 `LGPL-3.0-or-later`，不是 Mapperatorinator 本體的 MIT。為維持 inference-only 邊界，安裝時會套用內容嚴格比對的 re-export patch，避免載入未使用的 training utilities；若 pinned source 不符合預期便中止，不會修改未知版本。
+
+機器可讀的來源／slider／dependency identity 位於 `app/src-tauri/resources/manifests/mapperatorinator-v32.lock.json`；輸入與完整 hash lock 分別位於 `app/src-tauri/resources/python/mapperatorinator-windows-py310.requirements.in` 和 `.requirements.txt`。診斷頁會分開顯示 Mapperatorinator source 與 inference lock，並執行固定版本檢查及 `pip check`；任一項缺少或不一致時環境不會標示 Ready。
+
+#### 5.3 正式 worker 基礎
+
+- 建立 Python worker entry point 與 startup health check。
+- 沿用階段 3 的 versioned JSON Lines schema、stderr log 與最大訊息限制。
+- 回報 Python、PyTorch、CUDA、FFmpeg、Mapperatorinator 與模型版本。
+- 保留 mock worker，供沒有 GPU 的自動化測試使用。
+
+正式 bootstrap 以 embedded resource 隨應用程式發布，啟動前會原子部署到 application-managed `runtime/worker/1/beatforge_worker.py`，並由私有 Python 的 isolated mode 執行。worker stdin／stdout 只接受 protocol v1 的單行 JSON，單則訊息上限 64 KiB；upstream import、traceback 與其他診斷一律重新導向 stderr，Rust 最多保存 256 KiB 至 `logs/production-worker.log`，避免污染 JSON Lines channel。
+
+Models 畫面的 `Worker health` 會啟動一次最長 90 秒的獨立 health process，確認 Python executable、PyTorch／CUDA、受管理 FFmpeg、Mapperatorinator source marker 與五個固定 inference callables，以及 V32 模型的四個必要檔案。回報只檢查模型 identity 與檔案存在性，不會在 5.3 載入約 830 MB 權重。health report 包含 worker／protocol、Python、PyTorch、CUDA、GPU、FFmpeg、Mapperatorinator commit 與 model version；任何缺少項目會回傳結構化 errors 並顯示於 UI。
+
+階段 3 的 Rust mock worker 與故障情境測試仍保留；一般成功生成任務已於 5.5 切換至 production worker，進階選單中的 failure／OOM／hang／crash／malformed 情境仍走 mock worker，供回歸測試使用。
+
+#### 5.4 Request adapter
+
+- 將 domain request 轉換成 Mapperatorinator inference configuration。
+- 驗證音訊、beatmap、輸出路徑、gamemode、difficulty、seed 與 descriptors。
+- 解析受管理的模型絕對路徑，不接受前端傳入任意 checkpoint path。
+- 第一版只開放已驗證參數，其餘設定保留於 adapter 內部。
+
+實作結果：Vue domain request 只傳受控 model package id，不接受 checkpoint 或輸出路徑；目前開放 osu!standard、1.0–8.0 目標難度、0–65535 seed、正／負 descriptors、選用 `.osu` reference、AR、CS 與 hitsound 開關。音訊只接受上游已支援的 MP3、WAV、OGG、M4A、FLAC，descriptor 數量、長度、重複、正負衝突與控制字元皆在 Rust 邊界驗證。
+
+Rust adapter 會從 package database、application settings 與 managed runtime 解析 Mapperatorinator source、V32 model、輸入和 job output 的 canonical absolute paths；source、model、output 必須分別位於 application-managed root，模型四個必要檔案也必須存在。送入 Python 的 command 只含白名單 inference configuration，不包含 mock scenario 或前端 model 字串；Python worker 在載入推論前會再次驗證相同的檔案類型、範圍與固定 V32／gamemode 0 邊界。
+
+#### 5.5 真實推論與進度
+
+- 載入 V32 osu!standard 模型並執行第一個真實 inference。
+- 將音訊準備、模型載入、timing、生成及後處理映射成穩定的 worker stages。
+- 將上游不穩定的 log 與進度格式隔離於 adapter。
+- 將 Mapperatorinator 產出的 `.osu`／`.osz` 路徑交回 Rust；內容驗證留待階段 6。
+
+實作結果：`success` 任務會由 Rust 使用 application-managed Python 啟動正式 worker，依序呼叫固定版上游的 `compile_args`、`setup_inference_environment`、`load_model_with_server`、`get_config` 與 `generate`。推論強制使用已驗證的本機 V32 model、`auto_select_gamemode_model=false`、`use_server=false` 與 offline mode，不允許 Hugging Face 在任務期間解析或下載其他權重；V32 未啟用額外 diffusion checkpoint。
+
+worker 會回報 `adapter_ready`、`loading_runtime`、`configuring`、`loading_model`、`preparing_audio`、`generating` 與 `validating_output` 等穩定階段。模型載入和長時間生成期間每 15 秒送出 JSONL heartbeat，Rust 對 production worker 使用一小時無回報 timeout；完成後只接受 managed job directory 內的 `.osu`／`.osz`。音訊解碼固定使用 `imageio-ffmpeg` 診斷出的絕對路徑；由於該 wheel 不附 `ffprobe`，adapter 會略過 pydub 非必要的 probe metadata，仍由 FFmpeg 自動選擇 decoder 與 PCM 輸出。固定版自訂 model config 原本會重新查詢 `openai/whisper-small`；adapter 改用 manifest 已驗證的 V32 `config.json` 內嵌 `backbone_config`，backbone identity 或結構不符便中止，不提供網路 fallback。V32 的實驗性 CUDA graph fast decoder 在 PyTorch 2.10 timing pass 可能把全零機率分布傳給 `torch.multinomial` 並觸發 device-side assert，因此 MVP 固定關閉 `fast_decoder_loop`／`super_timing_fast_loop`，改走上游標準 generation path。第一版設定 `export_osz=true`，將音訊與生成譜面封裝成可匯入 osu! 的 `.osz`；reference `.osu` 使用 timing context。完整輸出內容與語意驗證仍屬階段 6。
+
+#### 5.6 失敗與資源生命週期
+
+- 分類 CUDA OOM、driver／wheel 不相容、模型缺失、音訊解碼及上游例外。
+- UI 顯示可理解摘要，完整 traceback 僅寫入本機 log。
+- 取消時先要求 worker graceful stop，逾時後由 Rust 強制終止 process tree。
+- 確認取消、失敗與 app 關閉後不殘留 GPU process 或 job 暫存檔。
+
+實作結果：production worker 會將 CUDA OOM、CUDA driver／runtime 不相容、CUDA 執行錯誤、模型不可用、音訊解碼失敗、輸入檔遺失、Hydra configuration 失敗與未分類上游例外轉成穩定錯誤碼及可理解摘要；完整原始例外與 traceback 只寫入 `logs/job-<id>.log`。UI 仍以既有 job record 顯示錯誤碼、是否可重試及友善摘要，不接收 traceback。
+
+Rust 在任務存活期間保留 worker stdin。取消與 app 關閉會先送出 versioned `cancel_job` JSONL 命令，Python cancellation watcher 以 SIGINT 讓主執行緒解除推論並回傳 `JOB_CANCELLED`；三秒內未離開時，Windows 使用 `taskkill /T /F` 終止 PID 及其 process tree，之後一律 wait/reap。timeout、protocol failure 與 monitor failure 也沿用相同收尾流程，確保 Python／CUDA process 不殘留。
+
+每個失敗、取消、啟動失敗與 app 關閉任務都會刪除 `jobs/<id>` 暫存目錄；retry 開始前與應用程式下次啟動時也會清理由中斷任務留下的目錄。清理只接受 managed jobs root 的直接子目錄，canonical path 不符時拒絕刪除。已完成任務的 `.osu`／`.osz` 不會被生命週期清理移除。worker stderr 改以原始位元組持續 drain 至 log，避免 Windows 系統編碼的 `tqdm` 進度造成 UTF-8 line reader 關閉 pipe 與 Python exit code 120。
+
+#### 5.7 可重現性與端到端驗收
+
+- 保存 source commit、model version、PyTorch backend、完整有效參數、seed 與輸入摘要。
+- 使用相同輸入與設定重跑，確認 provenance 完整且結果可追蹤。
+- 在支援的 NVIDIA GPU 上從 Vue 建立任務並取得第一個可由後續 validator 處理的輸出。
+- 記錄 VRAM、driver、耗時、已知限制與失敗案例。
+
+實作結果：production worker 的成功事件現在必須包含 provenance schema v1；內容保存固定 Mapperatorinator commit、model package/version、worker/protocol、Python/PyTorch/CUDA/GPU/driver、所有 adapter 實際生效的推論參數（包含 seed）、輸入與輸出檔案的大小及 SHA-256、UTC 起訖時間、耗時、CUDA peak allocated memory 與已知限制。`reproduction_key` 對 source/model、完整有效參數和輸入摘要做 canonical JSON SHA-256；相同輸入與設定的重跑會得到相同 key，而每次輸出 hash、時間與 runtime observation 仍可獨立比較。
+
+Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後才發布 completed 狀態；正式 worker 若遺漏紀錄或 SQLite 保存失敗，任務會以穩定錯誤終止，不會留下不可追溯的成功結果。Jobs 畫面會顯示 run key、GPU、effective precision、耗時與 peak VRAM，重新啟動後仍由 SQLite 載入。完整自動化命令、同設定重跑規則、實體 Windows/NVIDIA 流程、開發機硬體與已知失敗記錄見 `docs/testing/stage-5-gpu-acceptance.md`。
+
 工作項目：
 
 - 鎖定並記錄可重現的 Mapperatorinator commit／版本。

@@ -128,6 +128,7 @@ pub fn run() -> i32 {
         job_id: command.job_id,
         output_path: result_path.to_string_lossy().into_owned(),
         warnings: vec!["Mock worker output; not a playable beatmap".into()],
+        provenance: None,
     });
     0
 }
