@@ -566,6 +566,31 @@ Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後�
 
 目標：確保生成檔案可用，並順利交給 osu! Editor。
 
+目前進度：
+
+- [x] 6.1：固定輸出驗證契約、報告 schema、安全限制與測試樣本。
+- [x] 6.2：實作 `.osu` parser 與結構驗證。
+- [ ] 6.3：實作 timing、hit objects、座標與 slider 語意驗證。
+- [ ] 6.4：實作 `.osz` 安全解包、完整性驗證與重新封裝。
+- [ ] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
+- [ ] 6.6：建立非破壞式修正流程與 repair manifest。
+- [ ] 6.7：計算 difficulty statistics 並呈現結果摘要。
+- [ ] 6.8：完成 osu! 開啟／匯入流程與實體驗收。
+
+#### 6.1 輸出驗證契約
+
+Mapperatorinator 的成功事件只代表推論完成；階段 6 將輸出視為不受信任的 candidate，由 Rust 保存原始 artifact、驗證、選擇性建立修正副本並持久化 versioned report。接入 6.5 後，report 包含任何 `error` 的任務不得進入 `completed`，只有 `valid`、`valid_with_warnings` 或安全修正後的 `repaired` 可以交付。
+
+每個 job 固定使用 `raw`、`working`、`validated` 三個 artifact 區域；`raw` 不可覆寫，`working` 可清理，所有修正只能輸出至 `validated`。validation report schema v1 已固定 status、severity、stable error codes、issue context、statistics、repair audit 與 UTC timestamps；Rust 與 Vue 使用對應型別。預設 archive 限制為 256 entries、1 GiB 解壓總量、512 MiB 單檔、64 份 `.osu` 與 16 MiB 單一 `.osu`，並明確拒絕 traversal、absolute path、case collision、link entry 與超限輸出。
+
+自動修正採 deny-by-default；第一版只允許 BOM、行尾、尾端換行、安全 metadata whitespace、明確 scalar spelling 與安全檔名正規化，不自動更改 timing、BPM、hit-object 時間／座標／型別或 slider geometry。完整契約見 `docs/architecture/output-validation.md`，測試矩陣見 `docs/testing/stage-6-validation-matrix.md`；人工 `.osu` fixtures 與可審查的 hostile archive recipes 位於 `app/src-tauri/tests/fixtures/validation`，不含使用者歌曲或真實模型輸出。
+
+#### 6.2 `.osu` parser 與結構驗證
+
+Rust validator 現在提供受 16 MiB 上限保護的檔案與 bytes parser；檔案入口會先檢查 metadata 與 regular-file identity，再配置記憶體讀取。parser 接受 UTF-8、選用 BOM、LF／CRLF、空白與 `//` comments，固定支援 Mapperatorinator 輸出的 `osu file format v14` 與 osu!standard `Mode: 0`。無效 encoding、超限檔案或無法辨識的 header 是停止解析的 fatal issue；其餘問題會盡量一次收集並附上 section 與一基準原始行號。
+
+parser 將 `General`、`Metadata` 與 `Difficulty` 轉成 typed section，驗證必要欄位、唯一 key、有限數值及必要 section；`TimingPoints` 與 `HitObjects` 在 6.2 只驗證最低 CSV 結構並保留 raw value、tokens 與行號，實際 BPM、時間、物件型別、座標和 slider 規則留給 6.3。合法未知欄位與未知 section 會完整保留，重複的已知 section／欄位則視為不明確輸入而拒絕。解析結果可同時包含 partial typed beatmap 與 ordered issues，malformed input 不會 panic，且相同輸入會產生確定性相同的問題順序。
+
 工作項目：
 
 - 實作 `.osu` parser／validator。

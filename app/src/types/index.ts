@@ -26,6 +26,54 @@ export interface GenerationProvenance {
   timing: { started_at: string; completed_at: string; elapsed_seconds: number }
   known_limitations: string[]
 }
+
+export type ValidationStatus = 'valid' | 'valid_with_warnings' | 'repaired' | 'invalid'
+export type ValidationSeverity = 'error' | 'warning' | 'info'
+
+export interface ValidationIssue {
+  code: string
+  severity: ValidationSeverity
+  section?: string | null
+  line?: number | null
+  message: string
+  repairable: boolean
+}
+
+export interface BeatmapStatistics {
+  beatmapCount: number
+  circleCount: number
+  sliderCount: number
+  spinnerCount: number
+  maxCombo?: number | null
+  starRating?: number | null
+  bpmMin?: number | null
+  bpmMax?: number | null
+  durationMs?: number | null
+}
+
+export interface RepairRecord {
+  code: string
+  section?: string | null
+  field?: string | null
+  before?: string | null
+  after?: string | null
+  reason: string
+}
+
+export interface ValidationReport {
+  schemaVersion: number
+  validatorVersion: string
+  jobId: string
+  status: ValidationStatus
+  sourcePath: string
+  validatedPath?: string | null
+  issues: ValidationIssue[]
+  statistics?: BeatmapStatistics | null
+  repairs: RepairRecord[]
+  startedAt: string
+  completedAt: string
+}
+
 export interface GenerationJob {
   id: string
   title: string

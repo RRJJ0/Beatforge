@@ -1,0 +1,25 @@
+osu file format v14
+
+[General]
+AudioFilename: fixture.wav
+Mode: 0
+
+[Metadata]
+Title:Out of Bounds
+Artist:Beatforge
+Creator:Beatforge Tests
+Version:Invalid
+
+[Difficulty]
+HPDrainRate:5
+CircleSize:4
+OverallDifficulty:8
+ApproachRate:9
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[TimingPoints]
+0,500,4,2,1,70,1,0
+
+[HitObjects]
+700,-20,1000,1,0,0:0:0:0:

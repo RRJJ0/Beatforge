@@ -25,6 +25,7 @@ mod request_adapter;
 mod runtime;
 #[cfg(test)]
 mod stage4_acceptance;
+pub mod validation;
 mod worker;
 
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
