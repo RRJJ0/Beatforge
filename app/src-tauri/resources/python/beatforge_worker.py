@@ -23,8 +23,52 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "1"
+WORKER_VERSION = "2"
 MAX_MESSAGE_BYTES = 64 * 1024
+
+
+def install_untimed_group_guard() -> dict[str, int]:
+    """Discard incomplete generated groups that have no absolute time token.
+
+    V32 emits type-first event groups. If generation ends after an object type
+    but before its TIME_SHIFT token, Mapperatorinator's Group dataclass leaves
+    the time at its 0 ms default and the postprocessor serializes that object at
+    the end of the map. There is no timestamp to recover, so the only
+    deterministic treatment is to omit the incomplete group.
+    """
+    from osuT5.osuT5.dataset import data_utils
+    from osuT5.osuT5.inference import postprocessor
+
+    original_get_groups = postprocessor.get_groups
+    stats = {"dropped_untimed_groups": 0}
+
+    def guarded_get_groups(
+        events: list[Any], *, event_times=None, types_first: bool = False
+    ):
+        groups, group_indices = original_get_groups(
+            events,
+            event_times=event_times,
+            types_first=types_first,
+        )
+        if event_times is not None or not types_first:
+            return groups, group_indices
+
+        kept_groups = []
+        kept_indices = []
+        for group, indices in zip(groups, group_indices):
+            has_absolute_time = any(
+                events[index].type == data_utils.EventType.TIME_SHIFT
+                for index in indices
+            )
+            if has_absolute_time:
+                kept_groups.append(group)
+                kept_indices.append(indices)
+            else:
+                stats["dropped_untimed_groups"] += 1
+        return kept_groups, kept_indices
+
+    postprocessor.get_groups = guarded_get_groups
+    return stats
 
 
 def reserve_protocol_stdout():
@@ -586,6 +630,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     ):
         with contextlib.redirect_stdout(sys.stderr):
             inference = importlib.import_module("inference")
+            untimed_group_stats = install_untimed_group_guard()
 
     with loading_step(job_id, "loading_inference_config", 10, "Loading inference configuration"):
         with contextlib.redirect_stdout(sys.stderr):
@@ -724,6 +769,13 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
                 verbose=True,
             )
 
+    dropped_untimed_groups = untimed_group_stats["dropped_untimed_groups"]
+    if dropped_untimed_groups:
+        log(
+            "Discarded generated event groups without absolute time tokens: "
+            f"{dropped_untimed_groups}"
+        )
+
     progress(job_id, "validating_output", 95, "Checking the generated output path")
     result_path = Path(result_path).resolve(strict=True)
     try:
@@ -756,6 +808,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     reproducible_inputs = {
         "source_commit": source_commit,
         "model_version": model_version,
+        "worker_version": WORKER_VERSION,
         "parameters": effective_parameters,
         "input": input_summary,
     }
@@ -786,6 +839,9 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             "position diffusion disabled",
             "fast decoder disabled",
         ],
+        "output_sanitization": {
+            "dropped_untimed_groups": dropped_untimed_groups,
+        },
     }
     return result_path, provenance
 
@@ -796,13 +852,23 @@ def start_job(command: dict[str, Any]) -> int:
         raise ValueError("start_job requires a job_id")
     try:
         result_path, provenance = run_inference(command, job_id)
+        dropped_untimed_groups = provenance["output_sanitization"][
+            "dropped_untimed_groups"
+        ]
+        warnings = []
+        if dropped_untimed_groups:
+            warnings.append(
+                "Discarded "
+                f"{dropped_untimed_groups} incomplete generated event group(s) "
+                "without absolute time tokens."
+            )
         send(
             {
                 "type": "completed",
                 "protocol_version": PROTOCOL_VERSION,
                 "job_id": job_id,
                 "output_path": str(result_path),
-                "warnings": [],
+                "warnings": warnings,
                 "provenance": provenance,
             }
         )
