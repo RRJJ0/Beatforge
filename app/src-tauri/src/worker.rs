@@ -19,7 +19,19 @@ use tauri::{AppHandle, Emitter};
 
 const MOCK_WORKER_TIMEOUT: Duration = Duration::from_secs(8);
 const PRODUCTION_WORKER_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const RUNTIME_LOADING_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn is_runtime_loading_stage(stage: &str) -> bool {
+    matches!(
+        stage,
+        "loading_numpy"
+            | "loading_pytorch"
+            | "loading_audio_runtime"
+            | "loading_upstream"
+            | "loading_inference_config"
+    )
+}
 
 enum ManagerCommand {
     Enqueue {
@@ -78,6 +90,8 @@ struct ActiveWorker {
     stdin: Option<ChildStdin>,
     events: Receiver<Result<WorkerEvent, String>>,
     last_event: Instant,
+    stage: String,
+    stage_started: Instant,
     timeout: Duration,
     terminal_event_received: bool,
     cleanup_on_exit: bool,
@@ -303,6 +317,8 @@ fn spawn_worker(app: &AppHandle, id: String, input: StartJobInput) -> Result<Act
         stdin: Some(stdin),
         events,
         last_event: Instant::now(),
+        stage: "starting_worker".into(),
+        stage_started: Instant::now(),
         timeout,
         terminal_event_received: false,
         cleanup_on_exit: false,
@@ -347,6 +363,10 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
             message,
             ..
         } => {
+            if active.stage != stage {
+                active.stage.clone_from(&stage);
+                active.stage_started = Instant::now();
+            }
             update_job(
                 app,
                 &active.id,
@@ -573,6 +593,17 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
                     "Worker stopped reporting progress and was terminated",
                 );
             }
+            if !worker.terminal_event_received
+                && is_runtime_loading_stage(&worker.stage)
+                && worker.stage_started.elapsed() > RUNTIME_LOADING_TIMEOUT
+            {
+                fail_active(
+                    &app,
+                    worker,
+                    "RUNTIME_LOADING_TIMEOUT",
+                    "The managed Python runtime stopped responding while loading dependencies. Restart Beatforge and retry; repair the AI environment if it happens again.",
+                );
+            }
             match worker.child.try_wait() {
                 Ok(Some(status)) => {
                     if !worker.terminal_event_received {
@@ -627,7 +658,7 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{drain_worker_stderr, remove_managed_job_directory};
+    use super::{drain_worker_stderr, is_runtime_loading_stage, remove_managed_job_directory};
     use std::{fs, time::SystemTime};
 
     #[test]
@@ -641,6 +672,15 @@ mod tests {
         drain_worker_stderr(&bytes[..], &path);
         assert_eq!(fs::read(&path).unwrap(), bytes);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn only_dependency_imports_use_the_runtime_loading_timeout() {
+        assert!(is_runtime_loading_stage("loading_numpy"));
+        assert!(is_runtime_loading_stage("loading_upstream"));
+        assert!(is_runtime_loading_stage("loading_inference_config"));
+        assert!(!is_runtime_loading_stage("loading_model"));
+        assert!(!is_runtime_loading_stage("generating"));
     }
 
     #[test]

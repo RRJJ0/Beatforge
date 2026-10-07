@@ -295,7 +295,9 @@ mod tests {
 
     #[test]
     fn bootstrap_reserves_stdout_for_json_lines() {
-        assert!(WORKER_SOURCE.contains("PROTOCOL_STDOUT = sys.stdout"));
+        assert!(WORKER_SOURCE.contains("PROTOCOL_STDOUT = reserve_protocol_stdout()"));
+        assert!(WORKER_SOURCE.contains("os.dup2(sys.stderr.fileno(), sys.stdout.fileno())"));
+        assert!(WORKER_SOURCE.contains("SetStdHandle"));
         assert!(WORKER_SOURCE.contains("redirect_stdout(sys.stderr)"));
         assert!(WORKER_SOURCE.contains("MAX_MESSAGE_BYTES = 64 * 1024"));
         assert!(WORKER_SOURCE.contains("inference.compile_args(args"));
@@ -311,6 +313,9 @@ mod tests {
         assert!(WORKER_SOURCE.contains("args.fast_decoder_loop = False"));
         assert!(WORKER_SOURCE.contains("classify_inference_error"));
         assert!(WORKER_SOURCE.contains("watch_cancellation"));
+        assert!(WORKER_SOURCE.contains("loading_upstream"));
+        assert!(WORKER_SOURCE.contains("import numpy"));
+        assert!(WORKER_SOURCE.contains("CANCEL_REQUESTED.is_set()"));
         assert!(WORKER_SOURCE.contains("JOB_CANCELLED"));
         assert!(WORKER_SOURCE.contains("Beatmap inference is still running"));
     }

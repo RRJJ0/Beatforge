@@ -25,8 +25,46 @@ from typing import Any
 PROTOCOL_VERSION = 1
 WORKER_VERSION = "1"
 MAX_MESSAGE_BYTES = 64 * 1024
-PROTOCOL_STDOUT = sys.stdout
+
+
+def reserve_protocol_stdout():
+    """Keep one UTF-8 pipe for JSONL and send all other stdout to stderr.
+
+    contextlib.redirect_stdout only replaces Python's sys.stdout object. Native
+    extensions and background workers can still write locale-encoded bytes to
+    file descriptor 1, corrupting the JSONL protocol. Duplicate the original
+    pipe first, then redirect the process-level stdout descriptor before any
+    third-party modules are imported.
+    """
+    protocol_fd = os.dup(sys.stdout.fileno())
+    protocol_stdout = os.fdopen(
+        protocol_fd,
+        "w",
+        encoding="utf-8",
+        errors="strict",
+        newline="\n",
+        buffering=1,
+    )
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    if os.name == "nt":
+        # Some native Windows libraries bypass the C runtime descriptor and
+        # resolve STD_OUTPUT_HANDLE directly. Point that handle at stderr too.
+        import ctypes
+        import msvcrt
+
+        std_output_handle = 0xFFFF_FFF5
+        stderr_handle = msvcrt.get_osfhandle(sys.stderr.fileno())
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetStdHandle.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        kernel32.SetStdHandle.restype = ctypes.c_int
+        if not kernel32.SetStdHandle(std_output_handle, stderr_handle):
+            raise OSError("Failed to redirect the worker stdout handle")
+    return protocol_stdout
+
+
+PROTOCOL_STDOUT = reserve_protocol_stdout()
 SEND_LOCK = threading.Lock()
+CANCEL_REQUESTED = threading.Event()
 
 
 def file_summary(path: Path) -> dict[str, Any]:
@@ -173,6 +211,19 @@ def classify_inference_error(error: Exception) -> tuple[str, str, bool]:
             "The pinned Mapperatorinator configuration is incomplete. Repair the AI runtime.",
             False,
         )
+    if any(
+        marker in detail
+        for marker in (
+            "cpu dispatcher tracer already",
+            "error importing numpy",
+            "numpy.core.multiarray failed to import",
+        )
+    ):
+        return (
+            "RUNTIME_IMPORT_FAILED",
+            "The managed Python runtime could not initialize NumPy or PyTorch. Restart Beatforge and retry; repair the AI environment if it happens again.",
+            True,
+        )
     return (
         "UPSTREAM_INFERENCE_FAILED",
         "Mapperatorinator could not finish this beatmap. See the local job log for technical details.",
@@ -181,7 +232,14 @@ def classify_inference_error(error: Exception) -> tuple[str, str, bool]:
 
 
 def watch_cancellation(job_id: str) -> None:
-    raw = sys.stdin.buffer.readline(MAX_MESSAGE_BYTES + 2)
+    # Avoid retaining sys.stdin's BufferedReader lock in a daemon thread during
+    # interpreter shutdown.
+    raw = bytearray()
+    while len(raw) <= MAX_MESSAGE_BYTES + 1 and not raw.endswith(b"\n"):
+        chunk = os.read(sys.stdin.fileno(), MAX_MESSAGE_BYTES + 2 - len(raw))
+        if not chunk:
+            return
+        raw.extend(chunk)
     if not raw:
         return
     try:
@@ -196,6 +254,7 @@ def watch_cancellation(job_id: str) -> None:
         ):
             raise ValueError("Invalid cancellation command")
         log(f"Cancellation requested for {job_id}")
+        CANCEL_REQUESTED.set()
         signal.raise_signal(signal.SIGINT)
     except Exception as error:  # noqa: BLE001 - invalid control input is diagnostic only
         log(f"Cancellation watcher ignored input: {error}")
@@ -220,6 +279,21 @@ def heartbeat(job_id: str, stage: str, percent: int, message: str):
     finally:
         stopped.set()
         reporter.join(timeout=1)
+
+
+@contextlib.contextmanager
+def loading_step(job_id: str, stage: str, percent: int, message: str):
+    progress(job_id, stage, percent, message)
+    started = time.perf_counter()
+    log(f"{stage} started")
+    try:
+        with heartbeat(job_id, stage, percent, message):
+            yield
+    except BaseException:
+        log(f"{stage} interrupted after {time.perf_counter() - started:.3f}s")
+        raise
+    else:
+        log(f"{stage} finished after {time.perf_counter() - started:.3f}s")
 
 
 def read_command() -> dict[str, Any]:
@@ -480,23 +554,53 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     os.chdir(source_path)
     sys.path.insert(0, str(source_path))
 
-    progress(job_id, "loading_runtime", 8, "Loading the pinned Mapperatorinator runtime")
-    with contextlib.redirect_stdout(sys.stderr):
-        import imageio_ffmpeg
-        import torch
-        from pydub import AudioSegment
-        import pydub.audio_segment as pydub_audio_segment
+    # Initialize NumPy before PyTorch and before the cancellation watcher can
+    # inject SIGINT into native module initialization. An interrupted NumPy
+    # CPU dispatcher import can otherwise leave the process permanently stuck.
+    with loading_step(job_id, "loading_numpy", 5, "Initializing the numerical runtime"):
+        with contextlib.redirect_stdout(sys.stderr):
+            import numpy  # noqa: F401 - explicit initialization boundary
 
-        ffmpeg_executable = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve(strict=True)
-        os.environ["IMAGEIO_FFMPEG_EXE"] = str(ffmpeg_executable)
-        AudioSegment.converter = str(ffmpeg_executable)
-        # imageio-ffmpeg intentionally ships no ffprobe. Pydub only uses probe
-        # metadata to choose an explicit PCM codec; FFmpeg can safely select it.
-        pydub_audio_segment.mediainfo_json = lambda *_args, **_kwargs: {}
-        inference = importlib.import_module("inference")
-        install_local_v32_backbone_config(model_path)
-        from hydra import compose, initialize_config_dir
-        from omegaconf import OmegaConf
+    with loading_step(job_id, "loading_pytorch", 7, "Loading PyTorch and CUDA libraries"):
+        with contextlib.redirect_stdout(sys.stderr):
+            import torch
+
+    with loading_step(job_id, "loading_audio_runtime", 8, "Loading the managed audio runtime"):
+        with contextlib.redirect_stdout(sys.stderr):
+            import imageio_ffmpeg
+            from pydub import AudioSegment
+            import pydub.audio_segment as pydub_audio_segment
+
+            ffmpeg_executable = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve(strict=True)
+            os.environ["IMAGEIO_FFMPEG_EXE"] = str(ffmpeg_executable)
+            AudioSegment.converter = str(ffmpeg_executable)
+            # imageio-ffmpeg intentionally ships no ffprobe. Pydub only uses probe
+            # metadata to choose an explicit PCM codec; FFmpeg can safely select it.
+            pydub_audio_segment.mediainfo_json = lambda *_args, **_kwargs: {}
+
+    with loading_step(
+        job_id,
+        "loading_upstream",
+        9,
+        "Loading the pinned Mapperatorinator runtime",
+    ):
+        with contextlib.redirect_stdout(sys.stderr):
+            inference = importlib.import_module("inference")
+
+    with loading_step(job_id, "loading_inference_config", 10, "Loading inference configuration"):
+        with contextlib.redirect_stdout(sys.stderr):
+            install_local_v32_backbone_config(model_path)
+            from hydra import compose, initialize_config_dir
+            from omegaconf import OmegaConf
+
+    # Runtime imports are complete, so cancellation can safely interrupt
+    # configuration and inference without corrupting NumPy's native importer.
+    threading.Thread(
+        target=watch_cancellation,
+        args=(job_id,),
+        name=f"beatforge-cancel-{job_id}",
+        daemon=True,
+    ).start()
 
     progress(job_id, "configuring", 12, "Compiling the V32 inference configuration")
     with contextlib.redirect_stdout(sys.stderr):
@@ -691,12 +795,6 @@ def start_job(command: dict[str, Any]) -> int:
     if not isinstance(job_id, str) or not job_id:
         raise ValueError("start_job requires a job_id")
     try:
-        threading.Thread(
-            target=watch_cancellation,
-            args=(job_id,),
-            name=f"beatforge-cancel-{job_id}",
-            daemon=True,
-        ).start()
         result_path, provenance = run_inference(command, job_id)
         send(
             {
@@ -723,6 +821,19 @@ def start_job(command: dict[str, Any]) -> int:
         )
         return 130
     except Exception as error:  # noqa: BLE001 - worker boundary returns a stable protocol error
+        if CANCEL_REQUESTED.is_set():
+            log(f"Inference cancelled after interruption: {job_id}: {error}")
+            send(
+                {
+                    "type": "failed",
+                    "protocol_version": PROTOCOL_VERSION,
+                    "job_id": job_id,
+                    "code": "JOB_CANCELLED",
+                    "message": "Generation was cancelled.",
+                    "recoverable": True,
+                }
+            )
+            return 130
         log(f"Inference failed: {error}")
         traceback.print_exc(file=sys.stderr)
         code, message, recoverable = classify_inference_error(error)
