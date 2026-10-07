@@ -12,6 +12,24 @@ The phase 6.2 Rust parser has byte and file entry points. The file entry point v
 
 The current model supports Mapperatorinator's `osu file format v14` and osu!standard `Mode: 0`. `General`, `Metadata`, and `Difficulty` have typed required values while preserving every parsed key-value field. Timing points and hit objects retain their raw line, comma-separated tokens, and source line for phase 6.3 semantics. Unknown valid fields and sections are retained for forward compatibility; duplicate known sections and case-insensitive duplicate fields are rejected as ambiguous. The parser never rewrites the candidate bytes.
 
+## Timing and hit-object semantics
+
+Phase 6.3 consumes the parsed model without reading or rewriting files. It returns typed timing points and hit objects plus ordered issues, so invalid entries can be rejected while the report still describes later independent findings.
+
+Timing validation requires finite, time-ordered values; valid meter/sample/volume/flag fields; the correct beat-length sign for inherited and uninherited points; finite derived BPM or slider-velocity values; and at least one uninherited timing point. The difficulty scalars HP, CS, OD, and AR must remain in 0-10, while slider multiplier and tick rate must be positive.
+
+Hit-object validation accepts osu!standard circles, sliders, and spinners with legal combo and hit-sound flags. Object origins must use integer coordinates inside `0..=512 x 0..=384`, and object start times must be non-negative integers in source order. Sliders require a B/C/L/P curve with parseable `x:y` control points, a positive repeat count, and a finite positive pixel length. A control point outside the visible playfield is a warning because osu! can represent such geometry; an out-of-bounds object origin is an error. Spinner end time must follow start time. When an audio duration is available, an object known to end beyond it receives `OBJECT_AFTER_AUDIO_END` as a warning.
+
+Slider end-time calculation depends on timing/SV state and is deferred to the statistics pass. Until then, the optional audio-duration check uses object start time for circles/sliders and end time for spinners.
+
+## `.osz` archive boundary
+
+Phase 6.4 uses the pinned Rust `zip` crate with only stored/deflate entries enabled. Inspection occurs before filesystem writes and rejects invalid ZIP structure, encryption, unsupported compression, link-like entries, declared size/count violations, absolute/UNC/drive/device names, parent traversal, Windows reserved/ADS names, duplicate or case-colliding paths, and a file reused as a parent directory. Both declared metadata and bytes observed while streaming are limited; CRC/stream failures and declared-versus-observed size changes are errors.
+
+Extraction only creates a previously absent direct child of an existing parent. Entry paths are reconstructed from validated normal components, files use create-new semantics, and an extraction failure removes the directory created by that operation. After extraction, every beatmap passes the phase 6.2 parser and phase 6.3 semantic validator. A case-insensitive archive-relative index verifies `AudioFilename`, background/video/sample events, and custom hit-sample references without allowing references to traverse out of the archive.
+
+Packaging recursively inventories a trusted source directory without following links, applies the same limits and case-collision rules, and refuses to overwrite an output. Files are written in stable order to a sibling partial file. The finished ZIP is streamed again for CRC and byte-limit verification, atomically renamed, inspected again, and extracted into a disposable verification directory so parser, semantics, and resource references are rechecked. Any failure removes the candidate output and operation-owned staging data.
+
 ## State transition
 
 ```text

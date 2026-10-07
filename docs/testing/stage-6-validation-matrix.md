@@ -27,9 +27,11 @@
 
 Phase 6.2 additionally verifies UTF-8 BOM and CRLF acceptance, invalid UTF-8 rejection, pre-read file size enforcement, unsupported/missing headers, duplicate known section/key rejection, unknown section/field preservation, partial result collection, stable line context, and deterministic results for malformed input. `invalid-timing.osu`, `invalid-slider.osu`, and `out-of-bounds.osu` intentionally pass the 6.2 structural layer; their semantic errors are asserted when phase 6.3 is connected.
 
+Phase 6.3 verifies the valid fixture's derived 120 BPM and three typed objects; inherited timing/SV; timing and hit-object ordering; zero/incorrect beat length; the required uninherited timing point; difficulty ranges; supported object and hit-sound flags; object-origin bounds; slider curve/control-point/repeat/length rules; spinner end time; and optional audio-duration warnings. Out-of-playfield slider control points produce warnings without discarding an otherwise parseable slider.
+
 ## Archive matrix for phase 6.4
 
-`hostile/archive-cases.json` is used to generate the archive in a temporary directory at test time.
+`hostile/archive-cases.json` defines the reviewed cases mirrored by archives generated in a temporary directory at test time.
 
 | Recipe | Expected code |
 | --- | --- |
@@ -41,6 +43,8 @@ Phase 6.2 additionally verifies UTF-8 BOM and CRLF acceptance, invalid UTF-8 rej
 | Malformed ZIP directory | `ARCHIVE_INVALID` |
 | Valid archive with no `.osu` | `BEATMAP_NOT_FOUND` |
 | Stream exceeds declared/configured ceiling | `ARCHIVE_LIMIT_EXCEEDED`; partial working data removed |
+
+Phase 6.4 automated coverage additionally verifies malformed/non-ZIP input, archives without a beatmap, file-as-parent collisions, missing audio and background references, extraction into create-new paths, stable repackaging, streamed CRC/size verification, full post-package extraction/parse/semantic/resource validation, no overwrite, and cleanup of rejected package, partial, and verification artifacts.
 
 ## Lifecycle and repair matrix for phases 6.5-6.8
 

@@ -4,10 +4,15 @@
 //! module deliberately fixes the serialized report, issue, repair, statistics,
 //! artifact, and resource-limit shapes first.
 
+pub mod archive;
 pub mod limits;
 pub mod osu;
 pub mod types;
 
+pub use archive::{
+    ArchiveEntryInfo, ArchiveInspection, ArchiveResult, ExtractedArchive, extract_osz, inspect_osz,
+    package_osz_from_directory,
+};
 pub use limits::ValidationLimits;
 pub use types::{
     BeatmapStatistics, IssueSeverity, RepairRecord, ValidationCode, ValidationIssue,

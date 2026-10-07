@@ -570,8 +570,8 @@ Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後�
 
 - [x] 6.1：固定輸出驗證契約、報告 schema、安全限制與測試樣本。
 - [x] 6.2：實作 `.osu` parser 與結構驗證。
-- [ ] 6.3：實作 timing、hit objects、座標與 slider 語意驗證。
-- [ ] 6.4：實作 `.osz` 安全解包、完整性驗證與重新封裝。
+- [x] 6.3：實作 timing、hit objects、座標與 slider 語意驗證。
+- [x] 6.4：實作 `.osz` 安全解包、完整性驗證與重新封裝。
 - [ ] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
 - [ ] 6.6：建立非破壞式修正流程與 repair manifest。
 - [ ] 6.7：計算 difficulty statistics 並呈現結果摘要。
@@ -590,6 +590,18 @@ Mapperatorinator 的成功事件只代表推論完成；階段 6 將輸出視為
 Rust validator 現在提供受 16 MiB 上限保護的檔案與 bytes parser；檔案入口會先檢查 metadata 與 regular-file identity，再配置記憶體讀取。parser 接受 UTF-8、選用 BOM、LF／CRLF、空白與 `//` comments，固定支援 Mapperatorinator 輸出的 `osu file format v14` 與 osu!standard `Mode: 0`。無效 encoding、超限檔案或無法辨識的 header 是停止解析的 fatal issue；其餘問題會盡量一次收集並附上 section 與一基準原始行號。
 
 parser 將 `General`、`Metadata` 與 `Difficulty` 轉成 typed section，驗證必要欄位、唯一 key、有限數值及必要 section；`TimingPoints` 與 `HitObjects` 在 6.2 只驗證最低 CSV 結構並保留 raw value、tokens 與行號，實際 BPM、時間、物件型別、座標和 slider 規則留給 6.3。合法未知欄位與未知 section 會完整保留，重複的已知 section／欄位則視為不明確輸入而拒絕。解析結果可同時包含 partial typed beatmap 與 ordered issues，malformed input 不會 panic，且相同輸入會產生確定性相同的問題順序。
+
+#### 6.3 Timing 與 HitObject 語意驗證
+
+semantic validator 會將 6.2 的 raw timing／object tokens 轉成可供後續 statistics 使用的 typed representation。TimingPoints 會驗證有限 time／beat length、時間排序、meter、sample set、volume、uninherited flag 與正負 beat-length 關係，計算 uninherited BPM 或 inherited slider-velocity multiplier，並要求至少存在一個 uninherited timing point。Difficulty 的 HP、CS、OD、AR 必須介於 0–10，slider multiplier 與 tick rate 必須大於零。
+
+osu!standard hit objects 只接受 circle、slider、spinner 及合法 combo flags；validator 會驗證整數時間與排序、hit-sound flags、起始座標 `0..=512 × 0..=384`、spinner 結束時間，以及 slider 的 B/C/L/P curve、`x:y` control points、repeat 與有限正 pixel length。物件 origin 越界是 error；slider control point 位於可見 playfield 外保留輸出但回報 warning。呼叫端提供音訊長度時，超出已知結束時間的物件會回報 `OBJECT_AFTER_AUDIO_END` warning。6.3 仍不解包 `.osz`、不變更 job 狀態，也不自動修改 playable content。
+
+#### 6.4 `.osz` 安全解包與完整性
+
+Rust archive boundary 使用固定 `zip 8.6.0` 且只啟用 deflate 支援。preflight 會先驗證 `.osz`／ZIP 格式、entry count、宣告大小、壓縮方式、加密與 link-like entry，再拒絕 absolute／UNC／drive／device path、`..` traversal、Windows reserved／ADS 名稱、大小寫或 file-as-parent collision。解包目的地必須是不存在且 parent 已存在的直接子目錄；每個 entry 以 `create_new` 寫入，實際串流 bytes 會再次套用單檔與總量上限並驗證 CRC／宣告大小。任何 extraction error 都會移除由本次操作建立的 working directory。
+
+解包完成後，每份 `.osu` 會通過 6.2 parser 與 6.3 semantic validator，並以 archive-relative、大小寫不敏感索引確認 `AudioFilename`、background/video/sample events 與 custom hit-sample 檔案存在；不安全 reference 或缺少資源會阻止完成。重新封裝只遍歷明確 source root、拒絕 symlink 與輸出覆寫，依穩定順序寫入同目錄 `.partial`，完成後串流重讀、原子啟用，再解至隔離 `.verify` 目錄重新執行完整 parser／semantic／resource validation。驗證失敗時候選輸出及 staging artifacts 一律移除。
 
 工作項目：
 
