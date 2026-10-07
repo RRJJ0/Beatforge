@@ -23,7 +23,7 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "4"
+WORKER_VERSION = "5"
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
@@ -60,6 +60,10 @@ def install_untimed_group_guard() -> dict[str, int]:
         kept_indices = []
         last_absolute_time: int | None = None
         for group, indices in zip(groups, group_indices):
+            if group.event_type not in data_utils.TIMED_EVENTS:
+                kept_groups.append(group)
+                kept_indices.append(indices)
+                continue
             has_absolute_time = any(
                 events[index].type == data_utils.EventType.TIME_SHIFT
                 for index in indices

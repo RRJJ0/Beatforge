@@ -31,7 +31,7 @@ The adapter must redirect upstream `print` and logging output to stderr or the l
 
 ## Production worker bootstrap
 
-The version 4 bootstrap is embedded in the Rust binary and atomically materialized under `runtime/worker/4` before launch. Rust starts it with the managed Python interpreter in isolated mode and sends exactly one newline-terminated command. Both directions enforce the 64 KiB phase 3 message limit. The bootstrap captures stdout while importing PyTorch, FFmpeg and Mapperatorinator so upstream prints cannot become protocol frames; diagnostic output and tracebacks remain on stderr and are capped before being appended to the managed worker log.
+The version 5 bootstrap is embedded in the Rust binary and atomically materialized under `runtime/worker/5` before launch. Rust starts it with the managed Python interpreter in isolated mode and sends exactly one newline-terminated command. Both directions enforce the 64 KiB phase 3 message limit. The bootstrap captures stdout while importing PyTorch, FFmpeg and Mapperatorinator so upstream prints cannot become protocol frames; diagnostic output and tracebacks remain on stderr and are capped before being appended to the managed worker log.
 
 The `health_check` command imports the pinned source without loading model weights, validates the locked callable surface, resolves the managed FFmpeg executable, reports CUDA visibility, and checks the expected V32 model files. Its single `health` response carries protocol and worker versions plus component identity and structured errors. A non-ready health response is valid protocol data rather than a malformed-worker failure.
 
