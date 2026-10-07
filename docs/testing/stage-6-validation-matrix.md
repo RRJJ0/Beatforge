@@ -62,6 +62,8 @@ Phase 6.5 automated coverage verifies that a valid candidate is moved from the w
 
 Phase 6.6 coverage verifies BOM, CRLF/bare-CR, final-newline, known Metadata whitespace, and equivalent scalar normalization while asserting timing and hit-object lines remain byte-identical. Pipeline tests compare the preserved raw bytes, repaired deliverable, report repairs, applied/failed manifest, working-directory cleanup, and non-publication after failed revalidation. Archive coverage uses backslash-separated safe entries plus a repaired `.osu`, then requires the repackaged `.osz` to pass a fresh archive inspection and complete extraction validation.
 
+Phase 6.7 coverage verifies per-difficulty object counts, uninherited BPM range, spinner-aware duration, slider duration derivation inputs, and archive aggregation using summed counts, combined BPM extrema, and longest difficulty duration. Pipeline tests require statistics for valid and repaired `.osu`/`.osz` outputs and `statistics: null` for invalid output. TypeScript checking covers the Jobs summary rendering; `maxCombo` and `starRating` remain absent until a ruleset-compatible calculator is integrated.
+
 ## Commands
 
 Phases 6.1-6.5 are checked with:

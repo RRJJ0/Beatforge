@@ -1,6 +1,6 @@
 use crate::validation::{
-    IssueSeverity, RepairManifest, RepairManifestStatus, RepairRecord, ValidationCode,
-    ValidationIssue, ValidationLimits, ValidationReport, ValidationStatus,
+    BeatmapStatistics, IssueSeverity, RepairManifest, RepairManifestStatus, RepairRecord,
+    ValidationCode, ValidationIssue, ValidationLimits, ValidationReport, ValidationStatus,
     archive::{extract_osz, package_osz_from_directory},
     limits::{
         RAW_DIRECTORY, REPAIR_MANIFEST_FILE, VALIDATED_DIRECTORY, VALIDATION_REPORT_FILE,
@@ -8,6 +8,7 @@ use crate::validation::{
     },
     osu::{SemanticValidationContext, parse_osu_file, validate_semantics},
     repair::{normalize_osu_bytes, repair_extracted_archive},
+    statistics::{calculate_archive_statistics, calculate_file_statistics},
     types::{REPAIR_MANIFEST_SCHEMA_VERSION, VALIDATION_SCHEMA_VERSION, VALIDATOR_VERSION},
 };
 use chrono::{SecondsFormat, Utc};
@@ -190,6 +191,7 @@ struct ArtifactValidation {
     repairs: Vec<RepairRecord>,
     validated_path: Option<String>,
     repair_status: Option<RepairManifestStatus>,
+    statistics: Option<BeatmapStatistics>,
 }
 
 fn contains_errors(issues: &[ValidationIssue]) -> bool {
@@ -217,6 +219,9 @@ fn validate_and_repair_osu(
                 validated_path = Some(relative_display(VALIDATED_DIRECTORY, name));
             }
             return Ok(ArtifactValidation {
+                statistics: (!contains_errors(&original_issues))
+                    .then(|| calculate_file_statistics(raw_path, limits))
+                    .flatten(),
                 issues: original_issues,
                 repairs: Vec::new(),
                 validated_path,
@@ -235,6 +240,7 @@ fn validate_and_repair_osu(
         let issues = validate_osu(&working_path, limits);
         if contains_errors(&issues) {
             return Ok(ArtifactValidation {
+                statistics: None,
                 issues,
                 repairs: repaired.repairs,
                 validated_path: None,
@@ -244,6 +250,7 @@ fn validate_and_repair_osu(
         let destination = job_root.join(VALIDATED_DIRECTORY).join(name);
         atomic_copy(&working_path, &destination)?;
         Ok(ArtifactValidation {
+            statistics: calculate_file_statistics(&working_path, limits),
             issues,
             repairs: repaired.repairs,
             validated_path: Some(relative_display(VALIDATED_DIRECTORY, name)),
@@ -269,6 +276,7 @@ fn validate_and_repair_osz(
     let Some(extracted) = extracted.value else {
         let _ = fs::remove_dir_all(&working);
         return Ok(ArtifactValidation {
+            statistics: None,
             issues: original_issues,
             repairs: Vec::new(),
             validated_path: None,
@@ -279,6 +287,15 @@ fn validate_and_repair_osz(
         Ok(repairs) => repairs,
         Err(_) => {
             let mut validated_path = None;
+            let statistics = (!contains_errors(&original_issues))
+                .then(|| {
+                    calculate_archive_statistics(
+                        &extracted.root,
+                        &extracted.inspection.beatmap_paths,
+                        limits,
+                    )
+                })
+                .flatten();
             if !contains_errors(&original_issues) {
                 let destination = job_root.join(VALIDATED_DIRECTORY).join(name);
                 atomic_copy(raw_path, &destination)?;
@@ -286,6 +303,7 @@ fn validate_and_repair_osz(
             }
             let _ = fs::remove_dir_all(&working);
             return Ok(ArtifactValidation {
+                statistics,
                 issues: original_issues,
                 repairs: Vec::new(),
                 validated_path,
@@ -295,6 +313,15 @@ fn validate_and_repair_osz(
     };
     if repairs.is_empty() {
         let mut validated_path = None;
+        let statistics = (!contains_errors(&original_issues))
+            .then(|| {
+                calculate_archive_statistics(
+                    &extracted.root,
+                    &extracted.inspection.beatmap_paths,
+                    limits,
+                )
+            })
+            .flatten();
         if !contains_errors(&original_issues) {
             let destination = job_root.join(VALIDATED_DIRECTORY).join(name);
             atomic_copy(raw_path, &destination)?;
@@ -302,6 +329,7 @@ fn validate_and_repair_osz(
         }
         let _ = fs::remove_dir_all(&working);
         return Ok(ArtifactValidation {
+            statistics,
             issues: original_issues,
             repairs,
             validated_path,
@@ -313,12 +341,15 @@ fn validate_and_repair_osz(
     fs::create_dir(&validated_directory)
         .map_err(|error| format!("Could not create repaired artifact directory: {error}"))?;
     let destination = validated_directory.join(name);
+    let statistics =
+        calculate_archive_statistics(&extracted.root, &extracted.inspection.beatmap_paths, limits);
     let packaged = package_osz_from_directory(&extracted.root, &destination, limits);
     let _ = fs::remove_dir_all(&working);
     if packaged.has_errors() || packaged.value.is_none() {
         let _ = fs::remove_file(&destination);
         let _ = fs::remove_dir(&validated_directory);
         return Ok(ArtifactValidation {
+            statistics: None,
             issues: packaged.issues,
             repairs,
             validated_path: None,
@@ -326,6 +357,7 @@ fn validate_and_repair_osz(
         });
     }
     Ok(ArtifactValidation {
+        statistics,
         issues: packaged.issues,
         repairs,
         validated_path: Some(relative_display(VALIDATED_DIRECTORY, name)),
@@ -348,6 +380,7 @@ fn validate_and_repair(
         Some("osu") => validate_and_repair_osu(job_root, raw_path, name, limits),
         Some("osz") => validate_and_repair_osz(job_root, raw_path, name, limits),
         _ => Ok(ArtifactValidation {
+            statistics: None,
             issues: vec![issue(
                 ValidationCode::UnsupportedOutputType,
                 "Only .osu and .osz worker outputs are supported",
@@ -380,6 +413,7 @@ pub fn validate_candidate(
                 .unwrap_or("candidate")
                 .to_string(),
             ArtifactValidation {
+                statistics: None,
                 issues: vec![error],
                 repairs: Vec::new(),
                 validated_path: None,
@@ -453,7 +487,11 @@ pub fn validate_candidate(
         source_path: relative_display(RAW_DIRECTORY, &name),
         validated_path: artifact.validated_path,
         issues: artifact.issues,
-        statistics: None,
+        statistics: if has_errors {
+            None
+        } else {
+            artifact.statistics
+        },
         repairs: artifact.repairs,
         started_at,
         completed_at: utc_now(),
@@ -524,6 +562,13 @@ mod tests {
         .unwrap();
 
         assert!(report.can_complete());
+        let statistics = report.statistics.as_ref().unwrap();
+        assert_eq!(statistics.beatmap_count, 1);
+        assert_eq!(statistics.circle_count, 1);
+        assert_eq!(statistics.slider_count, 1);
+        assert_eq!(statistics.spinner_count, 1);
+        assert_eq!(statistics.bpm_min, Some(120.0));
+        assert_eq!(statistics.duration_ms, Some(2000));
         assert!(!candidate.exists());
         assert!(root.join("raw/generated.osu").is_file());
         assert!(root.join("validated/generated.osu").is_file());
@@ -549,6 +594,7 @@ mod tests {
 
         assert_eq!(report.status, ValidationStatus::Invalid);
         assert!(!report.can_complete());
+        assert!(report.statistics.is_none());
         assert!(root.join("raw/generated.osu").is_file());
         assert!(!root.join(VALIDATED_DIRECTORY).exists());
         let persisted: ValidationReport =
@@ -583,6 +629,7 @@ mod tests {
 
         assert_eq!(report.status, ValidationStatus::Repaired);
         assert!(report.can_complete());
+        assert_eq!(report.statistics.as_ref().unwrap().beatmap_count, 1);
         assert_eq!(fs::read(root.join("raw/generated.osu")).unwrap(), source);
         let validated = fs::read(root.join("validated/generated.osu")).unwrap();
         assert!(!validated.starts_with(b"\xef\xbb\xbf"));
@@ -621,6 +668,7 @@ mod tests {
 
         assert_eq!(report.status, ValidationStatus::Invalid);
         assert!(!report.can_complete());
+        assert!(report.statistics.is_none());
         assert!(root.join("raw/generated.osu").is_file());
         assert!(!root.join(VALIDATED_DIRECTORY).exists());
         let manifest: RepairManifest =
@@ -657,6 +705,7 @@ mod tests {
 
         assert_eq!(report.status, ValidationStatus::Repaired);
         assert!(report.can_complete());
+        assert_eq!(report.statistics.as_ref().unwrap().beatmap_count, 1);
         assert!(root.join("raw/generated.osz").is_file());
         let validated = root.join("validated/generated.osz");
         assert!(validated.is_file());

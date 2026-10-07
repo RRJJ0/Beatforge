@@ -9,6 +9,7 @@ pub mod limits;
 pub mod osu;
 pub mod pipeline;
 pub mod repair;
+pub mod statistics;
 pub mod types;
 
 pub use archive::{
@@ -18,6 +19,10 @@ pub use archive::{
 pub use limits::ValidationLimits;
 pub use pipeline::validate_candidate;
 pub use repair::{OsuRepairResult, normalize_osu_bytes, repair_extracted_archive};
+pub use statistics::{
+    aggregate_statistics, calculate_archive_statistics, calculate_beatmap_statistics,
+    calculate_file_statistics,
+};
 pub use types::{
     BeatmapStatistics, IssueSeverity, RepairManifest, RepairManifestStatus, RepairRecord,
     ValidationCode, ValidationIssue, ValidationReport, ValidationStatus,

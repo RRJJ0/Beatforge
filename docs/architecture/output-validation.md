@@ -114,6 +114,12 @@ Phase 6.6 implements the allowlist as a byte-preserving comparison followed by i
 
 For `.osz`, the already-safe extractor provides normalized relative paths in `working`; path-separator changes and contained `.osu` text repairs are audited before the directory is repackaged with the phase 6.4 packager. Repackaging therefore repeats archive limits, CRC checks, parsing, semantics, and asset-reference validation. A successful repair receives report status `repaired` and an `AUTO_REPAIR_APPLIED` info issue. Every attempted repair writes repair-manifest schema v1 with `applied` or `failed` status. A failed attempt removes working and validated data but keeps both the immutable raw artifact and its manifest audit.
 
+## Difficulty statistics
+
+Phase 6.7 calculates report statistics only from a candidate that has passed full validation, using the typed parser and semantic model rather than worker-supplied metadata. Per difficulty, object counts are exact and BPM range includes uninherited timing points. Playable duration runs from the earliest object start to the latest known object end. Spinner end time is explicit; slider end time is derived from the active uninherited beat length, inherited slider-velocity multiplier, difficulty SliderMultiplier, pixel length, and repeat count.
+
+Archive reports sum object and beatmap counts, combine the BPM range, and use the longest difficulty duration. Statistics are omitted for invalid output. `maxCombo` and `starRating` remain nullable and are intentionally unset until Beatforge integrates a reviewed calculator matching the target osu! ruleset; object count or a local approximation must not be mislabeled as either value.
+
 ## Fixture policy
 
 Fixtures under `app/src-tauri/tests/fixtures/validation` are artificial and small. Hostile archives are described by reviewed JSON recipes and generated only inside a test-owned temporary directory. Tests synthesize any required short WAV; copyrighted music and real user beatmaps are excluded from the repository.

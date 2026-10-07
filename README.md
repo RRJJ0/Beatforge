@@ -574,7 +574,7 @@ Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後�
 - [x] 6.4：實作 `.osz` 安全解包、完整性驗證與重新封裝。
 - [x] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
 - [x] 6.6：建立非破壞式修正流程與 repair manifest。
-- [ ] 6.7：計算 difficulty statistics 並呈現結果摘要。
+- [x] 6.7：計算 difficulty statistics 並呈現結果摘要。
 - [ ] 6.8：完成 osu! 開啟／匯入流程與實體驗收。
 
 #### 6.1 輸出驗證契約
@@ -614,6 +614,12 @@ Rust archive boundary 使用固定 `zip 8.6.0` 且只啟用 deflate 支援。pre
 repair engine 採 deny-by-default，只會移除 UTF-8 BOM、將 CRLF／CR 正規化成 LF、補上缺少的 final newline、整理 Metadata 已知欄位的外圍空白、正規化可明確解析且數值等價的 General／Editor／Metadata／Difficulty scalar spelling，以及在隔離解包時將安全的 archive path separator 轉為穩定名稱。TimingPoints、HitObjects、BPM、座標、物件型別、slider geometry、difficulty 數值本身及缺少的 metadata 內容都不會被猜測或修改；空白 Creator 仍只回報 warning，不能由程式代填。
 
 任何實際修正都只發生在 `working`，完成後重新執行完整 parser、semantic、archive 與 referenced-asset validation。通過時產生新的 `validated` artifact、`repaired` report status 與 `repair-manifest.json`；manifest 逐項記錄 code、section／field、非敏感 before／after 描述、原因及 UTC 完成時間。若重驗仍失敗，incomplete validated output 與 working data 會移除，manifest 標記 `failed`，job 保持不可完成；`raw` bytes 在成功與失敗路徑都不會改動。
+
+#### 6.7 Difficulty statistics 與結果摘要
+
+驗證成功或安全修正成功後，Rust 會從同一份 typed parser／semantic model 計算 statistics，不重新信任 worker 提供的摘要。單一 difficulty 會回報 circle、slider、spinner 數量、uninherited timing points 的 BPM 最小／最大值，以及從第一個 hit object 到最後一個已知結束時間的 playable duration；slider 尾端會使用當時的 redline beat length、inherited SV、SliderMultiplier、pixel length 與 repeats 推導，spinner 使用明確 end time。
+
+`.osz` 會逐一統計所有 difficulty，再彙總 beatmap count、物件總數與整個 set 的 BPM 範圍，duration 顯示最長 difficulty。統計只會寫入可完成的 validation report，無效輸出維持 `statistics: null`。Jobs UI 會顯示 difficulty 數、objects、BPM 與時間摘要；目前沒有引入與 osu! 官方等價的 difficulty calculator，因此 `starRating` 與 `maxCombo` 明確保留為 `null`，不以近似值誤導使用者。
 
 工作項目：
 

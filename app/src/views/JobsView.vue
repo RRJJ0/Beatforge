@@ -3,6 +3,7 @@ import { NButton, NCard, NEmpty, NIcon, NProgress, NTag, useMessage } from 'naiv
 import { CloseOutline, PlayOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
 import { useDesktopStore } from '@/stores/desktop'
+import type { BeatmapStatistics } from '@/types'
 
 const jobsStore = useJobsStore()
 const desktopStore = useDesktopStore()
@@ -25,6 +26,25 @@ async function runAction(action: () => Promise<void>, success?: string) {
   } catch (reason) {
     message.error(String(reason))
   }
+}
+
+function objectCount(statistics: BeatmapStatistics) {
+  return statistics.circleCount + statistics.sliderCount + statistics.spinnerCount
+}
+
+function bpmSummary(statistics: BeatmapStatistics) {
+  if (statistics.bpmMin == null || statistics.bpmMax == null) return 'BPM —'
+  const minimum = statistics.bpmMin.toFixed(1).replace(/\.0$/, '')
+  const maximum = statistics.bpmMax.toFixed(1).replace(/\.0$/, '')
+  return minimum === maximum ? `${minimum} BPM` : `${minimum}–${maximum} BPM`
+}
+
+function durationSummary(milliseconds?: number | null) {
+  if (milliseconds == null) return 'Duration —'
+  const totalSeconds = Math.round(milliseconds / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = String(totalSeconds % 60).padStart(2, '0')
+  return `${minutes}:${seconds}`
 }
 </script>
 
@@ -106,6 +126,18 @@ async function runAction(action: () => Promise<void>, success?: string) {
             <span>
               {{ job.validationReport.issues.filter((issue) => issue.severity === 'warning').length }}
               warnings
+            </span>
+          </div>
+          <div v-if="job.validationReport?.statistics" class="job-statistics">
+            <span>{{ job.validationReport.statistics.beatmapCount }} difficulty</span>
+            <span>{{ objectCount(job.validationReport.statistics) }} objects</span>
+            <span>{{ bpmSummary(job.validationReport.statistics) }}</span>
+            <span>{{ durationSummary(job.validationReport.statistics.durationMs) }}</span>
+            <span v-if="job.validationReport.statistics.maxCombo">
+              {{ job.validationReport.statistics.maxCombo }}× combo
+            </span>
+            <span v-if="job.validationReport.statistics.starRating">
+              ★ {{ job.validationReport.statistics.starRating.toFixed(2) }}
             </span>
           </div>
         </div>
@@ -244,6 +276,14 @@ async function runAction(action: () => Promise<void>, success?: string) {
 }
 .job-validation span:first-child {
   color: #66cdaa;
+}
+.job-statistics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 7px;
+  color: #b4bac8;
+  font-size: 9px;
 }
 .job-actions {
   display: grid;
