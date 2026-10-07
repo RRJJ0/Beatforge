@@ -37,7 +37,7 @@ export const useJobsStore = defineStore('jobs', () => {
   const mockTasks = new Map<string, MockTask>()
 
   const activeCount = computed(
-    () => jobs.value.filter((job) => ['running', 'queued'].includes(job.status)).length,
+    () => jobs.value.filter((job) => ['running', 'queued', 'validating'].includes(job.status)).length,
   )
   const completedJobs = computed(() => jobs.value.filter((job) => job.status === 'completed'))
   const completedToday = computed(() => completedJobs.value.length)
@@ -140,6 +140,7 @@ export const useJobsStore = defineStore('jobs', () => {
         job.progress = 0
         job.stage = 'Waiting for worker'
         job.errorMessage = undefined
+        job.validationReport = undefined
       }
       return
     }

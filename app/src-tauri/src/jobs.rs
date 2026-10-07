@@ -1,4 +1,7 @@
-use crate::protocol::StartJobInput;
+use crate::{
+    protocol::StartJobInput,
+    validation::{IssueSeverity, ValidationReport},
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +22,7 @@ pub struct JobRecord {
     pub scenario: String,
     pub created_at: String,
     pub provenance: Option<serde_json::Value>,
+    pub validation_report: Option<ValidationReport>,
 }
 
 pub fn migrate(connection: &Connection) -> Result<(), String> {
@@ -48,12 +52,31 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             )
             .map_err(|error| error.to_string())?;
     }
+    let validation_applied: Option<i64> = connection
+        .query_row(
+            "SELECT version FROM schema_migrations WHERE version = 3",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if validation_applied.is_none() {
+        connection
+            .execute_batch(
+                "ALTER TABLE jobs ADD COLUMN validation_report_json TEXT;
+                 INSERT INTO schema_migrations(version) VALUES (3);",
+            )
+            .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
 fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
     let provenance = row
         .get::<_, Option<String>>(13)?
+        .and_then(|value| serde_json::from_str(&value).ok());
+    let validation_report = row
+        .get::<_, Option<String>>(14)?
         .and_then(|value| serde_json::from_str(&value).ok());
     Ok(JobRecord {
         id: row.get(0)?,
@@ -70,10 +93,11 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
         scenario: row.get(11)?,
         created_at: row.get(12)?,
         provenance,
+        validation_report,
     })
 }
 
-const SELECT_JOB: &str = "SELECT id, title, artist, audio_file, model, difficulty, status, progress, stage, error_message, output_path, scenario, created_at, result_json FROM jobs";
+const SELECT_JOB: &str = "SELECT id, title, artist, audio_file, model, difficulty, status, progress, stage, error_message, output_path, scenario, created_at, result_json, validation_report_json FROM jobs";
 
 pub fn insert(
     connection: &Connection,
@@ -173,11 +197,53 @@ pub fn save_provenance(
     Ok(())
 }
 
+pub fn finish_validation(
+    connection: &Connection,
+    id: &str,
+    report: &ValidationReport,
+    output_path: Option<&str>,
+) -> Result<(), String> {
+    let report_json = serde_json::to_string(report).map_err(|error| error.to_string())?;
+    let warning_count = report
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == IssueSeverity::Warning)
+        .count();
+    let error_count = report
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == IssueSeverity::Error)
+        .count();
+    let (status, stage, error_message) = if report.can_complete() {
+        let stage = if warning_count == 0 {
+            "Completed and validated".to_string()
+        } else {
+            format!("Completed with {warning_count} validation warning(s)")
+        };
+        ("completed", stage, None)
+    } else {
+        (
+            "validation_failed",
+            format!("Validation failed with {error_count} error(s)"),
+            Some("The generated beatmap did not pass output validation"),
+        )
+    };
+    connection
+        .execute(
+            "UPDATE jobs SET status = ?2, progress = 100, stage = ?3, error_message = ?4,
+             output_path = ?5, validation_report_json = ?6, worker_pid = NULL,
+             updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![id, status, stage, error_message, output_path, report_json],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub fn reset_for_retry(connection: &Connection, id: &str) -> Result<(), String> {
     connection
         .execute(
             "UPDATE jobs SET status = 'queued', progress = 0, stage = 'Waiting for worker', error_message = NULL,
-             output_path = NULL, result_json = NULL, worker_pid = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+             output_path = NULL, result_json = NULL, validation_report_json = NULL, worker_pid = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![id],
         )
         .map_err(|error| error.to_string())?;
@@ -187,7 +253,7 @@ pub fn reset_for_retry(connection: &Connection, id: &str) -> Result<(), String> 
 pub fn delete(connection: &Connection, id: &str) -> Result<(), String> {
     connection
         .execute(
-            "DELETE FROM jobs WHERE id = ?1 AND status NOT IN ('running', 'queued')",
+            "DELETE FROM jobs WHERE id = ?1 AND status NOT IN ('running', 'queued', 'validating')",
             params![id],
         )
         .map_err(|error| error.to_string())?;
@@ -197,9 +263,9 @@ pub fn delete(connection: &Connection, id: &str) -> Result<(), String> {
 pub fn mark_interrupted(connection: &Connection) -> Result<(), String> {
     connection
         .execute(
-            "UPDATE jobs SET status = 'interrupted', stage = 'Application closed before the worker finished',
+            "UPDATE jobs SET status = 'interrupted', stage = 'Application closed before the job finished',
              error_message = 'The previous worker session was interrupted', worker_pid = NULL, updated_at = CURRENT_TIMESTAMP
-             WHERE status IN ('running', 'queued')",
+             WHERE status IN ('running', 'queued', 'validating')",
             [],
         )
         .map_err(|error| error.to_string())?;
@@ -209,6 +275,10 @@ pub fn mark_interrupted(connection: &Connection) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validation::{
+        IssueSeverity, ValidationCode, ValidationIssue, ValidationStatus,
+        types::{VALIDATION_SCHEMA_VERSION, VALIDATOR_VERSION},
+    };
 
     fn version_one_database() -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory database");
@@ -247,6 +317,7 @@ mod tests {
         let created = insert(&connection, "BF-TEST", &input).expect("job is inserted");
         assert_eq!(created.status, "queued");
         assert!(created.provenance.is_none());
+        assert!(created.validation_report.is_none());
         let provenance = serde_json::json!({
             "schema_version": 1,
             "reproduction_key": "same-input-settings"
@@ -291,5 +362,61 @@ mod tests {
             get(&connection, "BF-TEST").unwrap().unwrap().status,
             "interrupted"
         );
+    }
+
+    #[test]
+    fn validation_result_is_persisted_with_the_terminal_state() {
+        let connection = version_one_database();
+        migrate(&connection).expect("migration succeeds");
+        let input = StartJobInput {
+            title: "Test".into(),
+            artist: "Artist".into(),
+            audio_file: "test.wav".into(),
+            model: crate::packages::STANDARD_MODEL_ID.into(),
+            difficulty: 3.0,
+            gamemode: 0,
+            seed: 12345,
+            descriptors: vec![],
+            negative_descriptors: vec![],
+            reference_beatmap: None,
+            approach_rate: Some(9.0),
+            circle_size: Some(4.0),
+            hitsounded: true,
+            scenario: "success".into(),
+        };
+        insert(&connection, "BF-VALIDATED", &input).unwrap();
+        let report = ValidationReport {
+            schema_version: VALIDATION_SCHEMA_VERSION,
+            validator_version: VALIDATOR_VERSION.into(),
+            job_id: "BF-VALIDATED".into(),
+            status: ValidationStatus::ValidWithWarnings,
+            source_path: "raw/result.osz".into(),
+            validated_path: Some("validated/result.osz".into()),
+            issues: vec![ValidationIssue {
+                code: ValidationCode::MetadataIncomplete,
+                severity: IssueSeverity::Warning,
+                section: Some("Metadata".into()),
+                line: None,
+                message: "Metadata is incomplete".into(),
+                repairable: true,
+            }],
+            statistics: None,
+            repairs: Vec::new(),
+            started_at: "2026-10-07T00:00:00Z".into(),
+            completed_at: "2026-10-07T00:00:01Z".into(),
+        };
+
+        finish_validation(
+            &connection,
+            "BF-VALIDATED",
+            &report,
+            Some("C:\\jobs\\BF-VALIDATED\\validated\\result.osz"),
+        )
+        .unwrap();
+
+        let persisted = get(&connection, "BF-VALIDATED").unwrap().unwrap();
+        assert_eq!(persisted.status, "completed");
+        assert_eq!(persisted.validation_report, Some(report));
+        assert!(persisted.output_path.unwrap().contains("validated"));
     }
 }

@@ -572,7 +572,7 @@ Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後�
 - [x] 6.2：實作 `.osu` parser 與結構驗證。
 - [x] 6.3：實作 timing、hit objects、座標與 slider 語意驗證。
 - [x] 6.4：實作 `.osz` 安全解包、完整性驗證與重新封裝。
-- [ ] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
+- [x] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
 - [ ] 6.6：建立非破壞式修正流程與 repair manifest。
 - [ ] 6.7：計算 difficulty statistics 並呈現結果摘要。
 - [ ] 6.8：完成 osu! 開啟／匯入流程與實體驗收。
@@ -602,6 +602,12 @@ osu!standard hit objects 只接受 circle、slider、spinner 及合法 combo fla
 Rust archive boundary 使用固定 `zip 8.6.0` 且只啟用 deflate 支援。preflight 會先驗證 `.osz`／ZIP 格式、entry count、宣告大小、壓縮方式、加密與 link-like entry，再拒絕 absolute／UNC／drive／device path、`..` traversal、Windows reserved／ADS 名稱、大小寫或 file-as-parent collision。解包目的地必須是不存在且 parent 已存在的直接子目錄；每個 entry 以 `create_new` 寫入，實際串流 bytes 會再次套用單檔與總量上限並驗證 CRC／宣告大小。任何 extraction error 都會移除由本次操作建立的 working directory。
 
 解包完成後，每份 `.osu` 會通過 6.2 parser 與 6.3 semantic validator，並以 archive-relative、大小寫不敏感索引確認 `AudioFilename`、background/video/sample events 與 custom hit-sample 檔案存在；不安全 reference 或缺少資源會阻止完成。重新封裝只遍歷明確 source root、拒絕 symlink 與輸出覆寫，依穩定順序寫入同目錄 `.partial`，完成後串流重讀、原子啟用，再解至隔離 `.verify` 目錄重新執行完整 parser／semantic／resource validation。驗證失敗時候選輸出及 staging artifacts 一律移除。
+
+#### 6.5 Validation pipeline 與持久化
+
+正式 worker 的 `completed` 事件現在只表示推論結束。Rust 會先將任務切換為 `validating`，確認候選檔仍位於受管理的 job directory 且為 regular `.osu`／`.osz`，再將原檔移入不可覆寫的 `raw`。單一 `.osu` 會依序經過 6.2 與 6.3；`.osz` 則解至一次性的 `working/extracted`，執行 6.4 的 archive、beatmap 與資源 reference 驗證，完成後移除 working data。
+
+沒有 error 的候選檔會以 partial file、flush 與同目錄原子 rename 建立 `validated` 交付副本；含 warning 的報告可成為 `valid_with_warnings`，任何 error 都會進入 `validation_failed`，保留 `raw` 但不建立或發布 output path。`validation-report.json` 以相同方式原子寫入，SQLite schema v3 同步保存完整 report JSON，job API 與 Vue 型別可在重新啟動後還原狀態、issue 數量及 validated artifact identity。若程式在 validation 中被關閉，啟動復原會標示為 `interrupted` 並保留已建立的驗證 artifacts，不再把推論成功直接當作產品成功。
 
 工作項目：
 

@@ -39,6 +39,10 @@ generating -> validating -> packaging -> completed
 
 The worker's `completed` protocol event means inference completed and transfers ownership of a candidate path to Rust. It must not directly publish the terminal job state after the validator is connected in phase 6.5. A report containing any `error` cannot complete. `warning` and `info` findings may complete as `valid_with_warnings` where the candidate remains otherwise safe.
 
+Phase 6.5 implements this boundary synchronously in the worker coordinator. It first publishes a persisted `validating` state, resolves the candidate inside the managed job root, moves it into `raw`, and runs the file-type-specific validator. A valid candidate is copied through a flushed sibling partial file into `validated`; an invalid candidate keeps only `raw`. The report is atomically written to `validation-report.json` and saved in the jobs table by schema migration 3 before the final job event is emitted. SQLite updates the report, terminal status, validated output path, error summary, and cleared worker identity in one statement.
+
+The `output_path` exposed by a completed job always names the managed `validated` copy, never the worker candidate or `raw` artifact. `validation_failed` jobs expose no output path. Startup recovery marks an in-flight `validating` job as interrupted without deleting its validation artifacts; active worker jobs retain the existing temporary cleanup behavior.
+
 ## Artifact ownership
 
 Each managed job directory uses these reserved paths:

@@ -940,6 +940,7 @@ pub fn package_osz_from_directory(
                 "Package output could not be synchronized",
             )
         })?;
+        drop(output);
         verify_archive_streams(&partial, limits)?;
         fs::rename(&partial, output_path).map_err(|_| {
             issue(

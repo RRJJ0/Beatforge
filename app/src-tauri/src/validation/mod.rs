@@ -7,6 +7,7 @@
 pub mod archive;
 pub mod limits;
 pub mod osu;
+pub mod pipeline;
 pub mod types;
 
 pub use archive::{
@@ -14,6 +15,7 @@ pub use archive::{
     package_osz_from_directory,
 };
 pub use limits::ValidationLimits;
+pub use pipeline::validate_candidate;
 pub use types::{
     BeatmapStatistics, IssueSeverity, RepairRecord, ValidationCode, ValidationIssue,
     ValidationReport, ValidationStatus,

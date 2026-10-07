@@ -60,7 +60,7 @@ fn worker_completes_over_json_lines() {
         .collect();
     assert!(events.iter().any(|event| event["type"] == "progress"));
     assert!(events.iter().any(|event| event["type"] == "completed"));
-    assert!(output_path.join("mock-result.json").is_file());
+    assert!(output_path.join("mock-result.osu").is_file());
     let _ = fs::remove_dir_all(output_path);
 }
 

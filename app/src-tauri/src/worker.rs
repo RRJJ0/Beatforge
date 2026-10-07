@@ -409,21 +409,72 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
                     return true;
                 }
             }
-            let stage = if warnings.is_empty() {
-                "Completed".into()
-            } else {
-                format!("Completed with warning: {}", warnings.join("; "))
-            };
             update_job(
                 app,
                 &active.id,
-                "completed",
-                100,
-                &stage,
+                "validating",
+                98,
+                "Preserving and validating generated beatmap",
                 None,
-                Some(&output_path),
                 None,
+                Some(active.child.id()),
             );
+            let validation = build_paths(app).and_then(|paths| {
+                let job_root = PathBuf::from(paths.jobs).join(&active.id);
+                crate::validation::validate_candidate(
+                    &active.id,
+                    &job_root,
+                    Path::new(&output_path),
+                    &warnings,
+                    crate::validation::ValidationLimits::default(),
+                )
+                .map(|report| (job_root, report))
+            });
+            let (job_root, report) = match validation {
+                Ok(result) => result,
+                Err(error) => {
+                    update_job(
+                        app,
+                        &active.id,
+                        "validation_failed",
+                        100,
+                        "VALIDATION_PIPELINE_FAILED",
+                        Some(&error),
+                        None,
+                        None,
+                    );
+                    active.terminal_event_received = true;
+                    active.cleanup_on_exit = false;
+                    return true;
+                }
+            };
+            let validated_output = report
+                .can_complete()
+                .then_some(report.validated_path.as_deref())
+                .flatten()
+                .map(|relative| job_root.join(relative).to_string_lossy().into_owned());
+            let saved = open_database(app).and_then(|(connection, _)| {
+                jobs::finish_validation(
+                    &connection,
+                    &active.id,
+                    &report,
+                    validated_output.as_deref(),
+                )
+            });
+            if let Err(error) = saved {
+                update_job(
+                    app,
+                    &active.id,
+                    "validation_failed",
+                    100,
+                    "VALIDATION_REPORT_SAVE_FAILED",
+                    Some(&format!("Could not save the validation report: {error}")),
+                    None,
+                    None,
+                );
+            } else {
+                emit_job(app, &active.id);
+            }
             active.terminal_event_received = true;
             active.cleanup_on_exit = false;
             true
@@ -493,7 +544,9 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
                         None,
                         None,
                     );
-                } else if active.as_ref().is_some_and(|worker| worker.id == id)
+                } else if active
+                    .as_ref()
+                    .is_some_and(|worker| worker.id == id && !worker.terminal_event_received)
                     && let Some(mut worker) = active.take()
                 {
                     stop_worker(&mut worker);

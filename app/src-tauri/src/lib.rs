@@ -1071,6 +1071,13 @@ fn retry_job(
     let (connection, _) = open_database(&app)?;
     let input =
         jobs::get_input(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    let job = jobs::get(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    if !matches!(
+        job.status.as_str(),
+        "failed" | "validation_failed" | "cancelled" | "interrupted"
+    ) {
+        return Err("Only a failed, cancelled, or interrupted job can be retried".into());
+    }
     worker::cleanup_job_artifacts(&app, &job_id)?;
     jobs::reset_for_retry(&connection, &job_id)?;
     manager.enqueue(job_id, input)

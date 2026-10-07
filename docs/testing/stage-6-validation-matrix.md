@@ -58,9 +58,11 @@ Phase 6.4 automated coverage additionally verifies malformed/non-ZIP input, arch
 | App restarts | Report, artifact identity, and job state remain consistent |
 | Open/import action | Only a managed, validated path may reach the operating system |
 
+Phase 6.5 automated coverage verifies that a valid candidate is moved from the worker location to `raw`, copied to `validated`, and accompanied by a round-trippable JSON report; an invalid candidate keeps `raw` but publishes no validated artifact; and a candidate outside the managed job root is reported without being moved. Database migration coverage verifies schema v3 is idempotent and that report JSON, terminal status, warning state, and validated output path are persisted together. The mock worker now emits a structurally valid `.osu`, so the desktop development path passes through the same pipeline instead of bypassing validation.
+
 ## Commands
 
-Phases 6.1-6.2 are checked with:
+Phases 6.1-6.5 are checked with:
 
 ```powershell
 cd app

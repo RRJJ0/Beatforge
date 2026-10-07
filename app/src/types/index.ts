@@ -1,4 +1,12 @@
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+export type JobStatus =
+  | 'queued'
+  | 'running'
+  | 'validating'
+  | 'completed'
+  | 'validation_failed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
 export interface GenerationProvenance {
   schema_version: number
   job_id: string
@@ -90,6 +98,7 @@ export interface GenerationJob {
   errorMessage?: string
   outputPath?: string
   provenance?: GenerationProvenance | null
+  validationReport?: ValidationReport | null
 }
 
 export interface StartJobInput {

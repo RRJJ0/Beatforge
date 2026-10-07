@@ -47,6 +47,7 @@ pub enum ValidationCode {
     ObjectOutOfBounds,
     ObjectAfterAudioEnd,
     MetadataIncomplete,
+    WorkerWarning,
     AutoRepairApplied,
 }
 

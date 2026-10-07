@@ -9,8 +9,10 @@ const desktopStore = useDesktopStore()
 const message = useMessage()
 const statusType = {
   running: 'info',
+  validating: 'info',
   queued: 'warning',
   completed: 'success',
+  validation_failed: 'error',
   failed: 'error',
   cancelled: 'default',
   interrupted: 'warning',
@@ -70,7 +72,7 @@ async function runAction(action: () => Promise<void>, success?: string) {
             ><span>★ {{ job.difficulty.toFixed(1) }}</span
             ><span>{{ job.createdAt }}</span>
           </div>
-          <template v-if="job.status === 'running'">
+          <template v-if="['running', 'validating'].includes(job.status)">
             <div class="progress-label">
               <span>{{ job.stage }}</span
               ><span>{{ job.progress }}% · ETA {{ job.eta }}</span>
@@ -95,6 +97,17 @@ async function runAction(action: () => Promise<void>, success?: string) {
               Peak {{ job.provenance.runtime.peak_gpu_memory_mb.toFixed(0) }} MB
             </span>
           </div>
+          <div v-if="job.validationReport" class="job-validation">
+            <span>{{ job.validationReport.status.replaceAll('_', ' ') }}</span>
+            <span>
+              {{ job.validationReport.issues.filter((issue) => issue.severity === 'error').length }}
+              errors
+            </span>
+            <span>
+              {{ job.validationReport.issues.filter((issue) => issue.severity === 'warning').length }}
+              warnings
+            </span>
+          </div>
         </div>
         <div class="job-actions">
           <NButton
@@ -107,7 +120,7 @@ async function runAction(action: () => Promise<void>, success?: string) {
             ><template #icon><NIcon :component="CloseOutline" /></template
           ></NButton>
           <NButton
-            v-if="['failed', 'cancelled', 'interrupted'].includes(job.status)"
+            v-if="['failed', 'validation_failed', 'cancelled', 'interrupted'].includes(job.status)"
             secondary
             circle
             size="small"
@@ -219,6 +232,18 @@ async function runAction(action: () => Promise<void>, success?: string) {
 }
 .job-provenance span:first-child {
   color: #ff66aa;
+}
+.job-validation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 7px;
+  color: #858da0;
+  font-size: 9px;
+  text-transform: capitalize;
+}
+.job-validation span:first-child {
+  color: #66cdaa;
 }
 .job-actions {
   display: grid;
