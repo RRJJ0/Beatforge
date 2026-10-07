@@ -575,7 +575,7 @@ Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後�
 - [x] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
 - [x] 6.6：建立非破壞式修正流程與 repair manifest。
 - [x] 6.7：計算 difficulty statistics 並呈現結果摘要。
-- [ ] 6.8：完成 osu! 開啟／匯入流程與實體驗收。
+- [ ] 6.8：完成 osu! 開啟／匯入流程與實體驗收（程式與自動測試完成，待實機驗收）。
 
 #### 6.1 輸出驗證契約
 
@@ -621,6 +621,12 @@ repair engine 採 deny-by-default，只會移除 UTF-8 BOM、將 CRLF／CR 正�
 
 `.osz` 會逐一統計所有 difficulty，再彙總 beatmap count、物件總數與整個 set 的 BPM 範圍，duration 顯示最長 difficulty。統計只會寫入可完成的 validation report，無效輸出維持 `statistics: null`。Jobs UI 會顯示 difficulty 數、objects、BPM 與時間摘要；目前沒有引入與 osu! 官方等價的 difficulty calculator，因此 `starRating` 與 `maxCombo` 明確保留為 `null`，不以近似值誤導使用者。
 
+#### 6.8 osu! 開啟與匯入
+
+Jobs UI 對 completed 且具有 validated artifact 的任務提供 **Show validated output** 與 **Import into osu!**。每次操作都會由 Rust 重新讀取 SQLite，要求 job 為 completed、report 可交付、report job identity 一致，並比對 stored output、`validated/<filename>` relative path 與 canonical filesystem path；symlink、`raw`／`working`、外部路徑、非 `.osu`／`.osz` 或已遺失檔案都會拒絕，不信任前端傳入實體路徑。
+
+Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的執行檔，其次使用偵測到的 stable／lazer executable。手動匯入在找不到 executable 時可交給 Windows `.osu`／`.osz` file association；自動匯入只接受已驗證 executable，不使用 association fallback，並且只在完整 validation 成功後啟動。實機 stable／lazer 驗收清單位於 `docs/testing/stage-6-physical-acceptance.md`；完成該清單前 6.8 維持待驗收狀態。
+
 工作項目：
 
 - 實作 `.osu` parser／validator。
@@ -645,6 +651,89 @@ repair engine 採 deny-by-default，只會移除 UTF-8 BOM、將 CRLF／CR 正�
 ### 階段 7：歷史、設定與產品完善
 
 目標：完成可日常使用的任務管理體驗。
+
+規劃子項目：
+
+- [ ] 7.1：建立正式歷史資料檢視、搜尋、篩選與排序。
+- [ ] 7.2：完成歷史任務刪除、重新生成與檔案一致性處理。
+- [ ] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
+- [ ] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
+- [ ] 7.5：加入桌面通知與背景任務完成／失敗提示。
+- [ ] 7.6：加入輕量音訊、時間軸與物件密度預覽。
+- [ ] 7.7：完成繁體中文／英文介面與 accessibility 改善。
+- [ ] 7.8：執行產品整合、migration 與日常流程驗收。
+
+#### 7.1 歷史檢視、搜尋與篩選
+
+- 將 History 畫面改為讀取 SQLite 的正式 job records，不使用展示資料。
+- 支援關鍵字、狀態、模型與日期篩選，以及建立時間排序。
+- 明確呈現完成、驗證失敗、推論失敗、取消與中斷狀態。
+- 處理大量歷史紀錄，避免一次渲染造成介面卡頓。
+
+驗收：重新啟動後仍可查到既有任務；組合篩選與空結果狀態正確，畫面內容與 SQLite 一致。
+
+#### 7.2 歷史動作與檔案一致性
+
+- 刪除前顯示影響範圍，並安全移除 job record 與該 job 的受管理檔案。
+- 重新生成時複製原任務可重用的輸入與有效設定，建立新的 job identity，不覆寫舊任務。
+- 輸入音訊、reference 或輸出檔遺失時顯示可理解狀態與可行動提示。
+- 加入刪除、重新生成及資料庫／檔案不同步的測試。
+
+驗收：操作只影響指定 job；無法解析或位於受管理目錄外的路徑不得刪除，舊任務與 provenance 保持可追蹤。
+
+#### 7.3 設定預設值、匯入／匯出與 migration
+
+- 定義 versioned settings schema、平台預設值、欄位驗證與向後相容 migration。
+- 提供 JSON 設定匯出與匯入預覽；匯入前列出將變更、忽略或重設的欄位。
+- 敏感、機器限定或不存在的路徑不盲目套用，匯入失敗不破壞目前設定。
+- 提供單項或全部恢復預設值，並測試舊版本設定升級。
+
+驗收：設定可跨重啟保存；合法設定可往返匯出／匯入，損壞或較新版本檔案會被安全拒絕。
+
+#### 7.4 磁碟用量與安全清理
+
+- 統計 runtime、model、cache、logs、jobs raw／working／validated 的用量與最後更新時間。
+- 提供可預覽的清理選項，區分可重新下載 cache、暫存資料、舊 logs 與使用者成果。
+- 清理採 managed-root allowlist，拒絕 symlink、越界路徑、執行中 job 與預設刪除 validated 成果。
+- 清理完成後重新計算用量並回報釋放空間與失敗項目。
+
+驗收：預覽數量與實際清理結果一致；清理不影響已安裝模型、執行中任務或使用者未明確選擇的成果。
+
+#### 7.5 桌面通知與背景狀態
+
+- 在任務完成、驗證失敗或推論失敗時提供可設定的 Windows 桌面通知。
+- 應用程式在前景時避免重複干擾；背景通知可帶回對應任務畫面。
+- 通知只顯示必要摘要，不包含 traceback、完整本機路徑或其他敏感資料。
+- 通知權限不可用時降級為應用程式內提示，不影響任務結果。
+
+驗收：各終止狀態至多通知一次；關閉通知後不再顯示系統通知，重新啟動不重播舊通知。
+
+#### 7.6 輕量結果預覽
+
+- 提供本機音訊播放、播放位置與基本波形／時間軸。
+- 由已驗證的 statistics 或 typed beatmap 資料產生物件密度摘要，支援多 difficulty 切換。
+- 預覽資料必須來自 validated artifact，並限制解析大小與 UI 點數，避免阻塞主介面。
+- 此功能只用於檢視與定位，不提供 hit object 編輯或取代 osu! Editor。
+
+驗收：播放、seek、difficulty 切換與密度顯示一致；遺失或不支援的音訊會安全降級且不影響匯入。
+
+#### 7.7 雙語與 Accessibility
+
+- 將使用者可見字串集中管理，完成繁體中文與英文切換及保存。
+- 檢查鍵盤導覽、focus 順序、focus 樣式、dialog focus trap、表單 label 與錯誤提示。
+- 改善文字／狀態對比、縮放、長字串、減少動態效果與不只依賴顏色傳達狀態。
+- 為主要流程建立 accessibility checklist，修正自動檢查與人工鍵盤測試發現的問題。
+
+驗收：不使用滑鼠即可完成設定、建立任務、查看結果與匯入；兩種語言下主要畫面無截斷或未翻譯字串。
+
+#### 7.8 產品整合與日常流程驗收
+
+- 串接 History、Settings、storage、notifications、preview 與既有生成／驗證／匯入流程。
+- 測試由舊資料庫與舊設定升級、重啟恢復、遺失檔案、磁碟不足與清理後狀態。
+- 在一般 Windows 使用者環境完成不查看命令列的日常流程測試。
+- 記錄已知限制、驗收結果與階段 8 發布前仍需處理的項目。
+
+驗收：一般使用者可從生成、背景等待、通知、歷史查找、預覽到 osu! 匯入完成完整流程；歷史、設定與實體檔案保持一致。
 
 工作項目：
 

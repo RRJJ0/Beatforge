@@ -474,6 +474,11 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
                 );
             } else {
                 emit_job(app, &active.id);
+                if report.can_complete()
+                    && let Err(error) = crate::try_auto_import(app, &active.id)
+                {
+                    log::warn!("Automatic osu! import was not started: {error}");
+                }
             }
             active.terminal_event_received = true;
             active.cleanup_on_exit = false;

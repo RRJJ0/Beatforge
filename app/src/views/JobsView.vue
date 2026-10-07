@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { NButton, NCard, NEmpty, NIcon, NProgress, NTag, useMessage } from 'naive-ui'
-import { CloseOutline, PlayOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
+import {
+  CloseOutline,
+  FolderOpenOutline,
+  OpenOutline,
+  PlayOutline,
+  RefreshOutline,
+  TrashOutline,
+} from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
 import { useDesktopStore } from '@/stores/desktop'
 import type { BeatmapStatistics } from '@/types'
+import { importDesktopJobOutput, revealDesktopJobOutput } from '@/services/desktop'
 
 const jobsStore = useJobsStore()
 const desktopStore = useDesktopStore()
@@ -142,6 +150,26 @@ function durationSummary(milliseconds?: number | null) {
           </div>
         </div>
         <div class="job-actions">
+          <NButton
+            v-if="job.status === 'completed' && job.outputPath"
+            quaternary
+            circle
+            size="small"
+            title="Show validated output"
+            aria-label="Show validated output"
+            @click="runAction(() => revealDesktopJobOutput(job.id))"
+            ><template #icon><NIcon :component="FolderOpenOutline" /></template
+          ></NButton>
+          <NButton
+            v-if="job.status === 'completed' && job.outputPath"
+            secondary
+            circle
+            size="small"
+            title="Import into osu!"
+            aria-label="Import into osu!"
+            @click="runAction(() => importDesktopJobOutput(job.id).then(() => undefined), 'Import opened')"
+            ><template #icon><NIcon :component="OpenOutline" /></template
+          ></NButton>
           <NButton
             v-if="['running', 'queued'].includes(job.status)"
             quaternary

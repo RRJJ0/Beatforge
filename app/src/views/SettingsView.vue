@@ -157,6 +157,8 @@ async function saveSettings() {
               v-for="installation in desktopStore.osuInstallations"
               :key="installation.path"
               type="button"
+              :disabled="!installation.executable"
+              :title="installation.executable ? 'Use this osu! installation' : 'No osu!.exe detected here'"
               @click="osuPath = installation.path"
             >
               <strong>osu! {{ installation.kind }}</strong
@@ -166,7 +168,7 @@ async function saveSettings() {
           <div class="setting-row">
             <div>
               <strong>Import into osu! automatically</strong
-              ><small>Open the .osz package when generation finishes.</small>
+              ><small>Open validated output after generation finishes.</small>
             </div>
             <NSwitch v-model:value="autoImport" />
           </div>
@@ -375,6 +377,10 @@ async function saveSettings() {
   color: inherit;
   background: rgba(127, 127, 127, 0.035);
   cursor: pointer;
+}
+.detected-paths button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 .detected-paths strong,
 .detected-paths span {

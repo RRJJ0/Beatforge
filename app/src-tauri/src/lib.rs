@@ -19,6 +19,7 @@ mod mapperatorinator;
 mod mapperatorinator_lock;
 mod mock_worker;
 mod models;
+mod osu_integration;
 mod packages;
 mod protocol;
 mod request_adapter;
@@ -77,6 +78,7 @@ struct OsuInstallation {
     kind: String,
     path: String,
     songs_path: Option<String>,
+    executable: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,8 +250,65 @@ fn detect_osu_installations() -> Vec<OsuInstallation> {
             songs_path: songs
                 .filter(|candidate| candidate.exists())
                 .map(|candidate| path_string(&candidate)),
+            executable: {
+                let candidate = path.join("osu!.exe");
+                candidate.is_file().then(|| path_string(&candidate))
+            },
         })
         .collect()
+}
+
+fn validated_job_artifact(app: &AppHandle, job_id: &str) -> Result<PathBuf, String> {
+    let (connection, paths) = open_database(app)?;
+    let job = jobs::get(&connection, job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    osu_integration::resolve_validated_artifact(
+        Path::new(&paths.jobs),
+        job_id,
+        &job.status,
+        job.output_path.as_deref(),
+        job.validation_report.as_ref(),
+    )
+}
+
+fn selected_osu_executable(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let settings = load_settings_value(app)?;
+    let detected = detect_osu_installations()
+        .into_iter()
+        .filter_map(|installation| installation.executable.map(PathBuf::from));
+    osu_integration::select_osu_executable(Some(&settings.osu_path), detected)
+}
+
+#[tauri::command]
+fn reveal_job_output(app: AppHandle, job_id: String) -> Result<(), String> {
+    let artifact = validated_job_artifact(&app, &job_id)?;
+    osu_integration::reveal_artifact(&artifact)
+}
+
+#[tauri::command]
+fn import_job_output(
+    app: AppHandle,
+    job_id: String,
+) -> Result<osu_integration::ImportLaunch, String> {
+    let artifact = validated_job_artifact(&app, &job_id)?;
+    let executable = selected_osu_executable(&app)?;
+    osu_integration::import_artifact(&artifact, executable.as_deref(), true)
+}
+
+pub(crate) fn try_auto_import(app: &AppHandle, job_id: &str) -> Result<(), String> {
+    let settings = load_settings_value(app)?;
+    if !settings.auto_import {
+        return Ok(());
+    }
+    let artifact = validated_job_artifact(app, job_id)?;
+    let detected = detect_osu_installations()
+        .into_iter()
+        .filter_map(|installation| installation.executable.map(PathBuf::from));
+    let executable = osu_integration::select_osu_executable(Some(&settings.osu_path), detected)?
+        .ok_or_else(|| {
+            "Automatic import skipped because no osu! executable was detected".to_string()
+        })?;
+    osu_integration::import_artifact(&artifact, Some(&executable), false)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1134,7 +1193,9 @@ pub fn run() {
             remove_model_package,
             cancel_job,
             retry_job,
-            delete_job
+            delete_job,
+            reveal_job_output,
+            import_job_output
         ])
         .build(tauri::generate_context!())
         .expect("error while building Beatforge");

@@ -247,6 +247,13 @@ export interface OsuInstallation {
   kind: string
   path: string
   songsPath?: string
+  executable?: string
+}
+
+export interface OsuImportLaunch {
+  method: 'executable' | 'file_association'
+  application?: string | null
+  artifact: string
 }
 
 export interface AppSettings {

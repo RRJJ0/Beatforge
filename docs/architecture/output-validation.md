@@ -120,6 +120,12 @@ Phase 6.7 calculates report statistics only from a candidate that has passed ful
 
 Archive reports sum object and beatmap counts, combine the BPM range, and use the longest difficulty duration. Statistics are omitted for invalid output. `maxCombo` and `starRating` remain nullable and are intentionally unset until Beatforge integrates a reviewed calculator matching the target osu! ruleset; object count or a local approximation must not be mislabeled as either value.
 
+## Operating-system delivery boundary
+
+Phase 6.8 never accepts an artifact path from the UI. A job-id command reloads the SQLite record and requires `completed`, a completable report with matching job identity, one `validated/<filename>` relative path, a matching stored output path, a regular non-symlink file, and canonical containment directly beneath the managed validated directory. Only `.osu` and `.osz` may cross this boundary.
+
+Windows folder reveal uses Explorer only after the boundary check. Import prefers an explicitly configured `osu!.exe`, then a detected stable/lazer executable. Manual import may use the Windows file association when no executable is available; automatic import is stricter and never uses that fallback. An automatic launch failure is logged but cannot retroactively invalidate a correctly validated beatmap. Physical Editor acceptance remains a human gate documented in `docs/testing/stage-6-physical-acceptance.md`.
+
 ## Fixture policy
 
 Fixtures under `app/src-tauri/tests/fixtures/validation` are artificial and small. Hostile archives are described by reviewed JSON recipes and generated only inside a test-owned temporary directory. Tests synthesize any required short WAV; copyrighted music and real user beatmaps are excluded from the repository.

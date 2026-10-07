@@ -64,6 +64,8 @@ Phase 6.6 coverage verifies BOM, CRLF/bare-CR, final-newline, known Metadata whi
 
 Phase 6.7 coverage verifies per-difficulty object counts, uninherited BPM range, spinner-aware duration, slider duration derivation inputs, and archive aggregation using summed counts, combined BPM extrema, and longest difficulty duration. Pipeline tests require statistics for valid and repaired `.osu`/`.osz` outputs and `statistics: null` for invalid output. TypeScript checking covers the Jobs summary rendering; `maxCombo` and `starRating` remain absent until a ruleset-compatible calculator is integrated.
 
+Phase 6.8 automated coverage verifies completed/report identity gates, direct `validated` containment, stored/report path agreement, regular-file identity, supported extensions, rejection of raw or mismatched outputs, and configured `osu!.exe` selection. TypeScript checking covers manual reveal/import actions and detected executable metadata. Actual stable/lazer import, Editor behavior, file association, focus behavior, and automatic launch are completed with `stage-6-physical-acceptance.md` on a machine with osu! installed.
+
 ## Commands
 
 Phases 6.1-6.5 are checked with:

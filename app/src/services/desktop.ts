@@ -11,6 +11,7 @@ import type {
   ManagedPackage,
   ModelInfo,
   OsuInstallation,
+  OsuImportLaunch,
   RuntimeInfo,
   StartJobInput,
   SystemInfo,
@@ -152,6 +153,14 @@ export async function retryDesktopJob(jobId: string) {
 
 export async function deleteDesktopJob(jobId: string) {
   return invoke<void>('delete_job', { jobId })
+}
+
+export async function revealDesktopJobOutput(jobId: string) {
+  return invoke<void>('reveal_job_output', { jobId })
+}
+
+export async function importDesktopJobOutput(jobId: string) {
+  return invoke<OsuImportLaunch>('import_job_output', { jobId })
 }
 
 export function onDesktopJobEvent(handler: (job: GenerationJob) => void): Promise<UnlistenFn> {
