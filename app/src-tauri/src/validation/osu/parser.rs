@@ -384,7 +384,7 @@ fn parse_metadata(section: &SectionBuffer, issues: &mut Vec<ValidationIssue>) ->
             Some("Metadata"),
             creator.as_ref().map(|value| value.line),
             "Creator is empty",
-            true,
+            false,
         ));
     }
     MetadataSection {

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const VALIDATION_SCHEMA_VERSION: u16 = 1;
 pub const VALIDATOR_VERSION: &str = "1";
+pub const REPAIR_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +86,25 @@ pub struct RepairRecord {
     pub before: Option<String>,
     pub after: Option<String>,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepairManifestStatus {
+    Applied,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairManifest {
+    pub schema_version: u16,
+    pub job_id: String,
+    pub status: RepairManifestStatus,
+    pub source_path: String,
+    pub validated_path: Option<String>,
+    pub repairs: Vec<RepairRecord>,
+    pub completed_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

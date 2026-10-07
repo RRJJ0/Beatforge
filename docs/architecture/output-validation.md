@@ -110,6 +110,10 @@ Repairs are deny-by-default. The initial allowlist is limited to byte-order-mark
 
 The first release must not automatically change hit-object time, position, type, slider geometry, timing/BPM, difficulty values, or playable content. A repair creates a new artifact under `validated`, records before/after/reason in `repair-manifest.json`, and runs the complete validator again. Failure of the repaired copy leaves `raw` untouched and the job non-completable.
 
+Phase 6.6 implements the allowlist as a byte-preserving comparison followed by isolated rewriting. `.osu` normalization may remove a UTF-8 BOM, convert CRLF or bare CR to LF, add a missing final newline, trim only known Metadata key/value boundaries, and canonicalize only finite integer or floating-point spellings whose parsed numeric value is unchanged. Timing-point and hit-object lines are never candidates for scalar normalization. Missing or empty semantic content is not invented.
+
+For `.osz`, the already-safe extractor provides normalized relative paths in `working`; path-separator changes and contained `.osu` text repairs are audited before the directory is repackaged with the phase 6.4 packager. Repackaging therefore repeats archive limits, CRC checks, parsing, semantics, and asset-reference validation. A successful repair receives report status `repaired` and an `AUTO_REPAIR_APPLIED` info issue. Every attempted repair writes repair-manifest schema v1 with `applied` or `failed` status. A failed attempt removes working and validated data but keeps both the immutable raw artifact and its manifest audit.
+
 ## Fixture policy
 
 Fixtures under `app/src-tauri/tests/fixtures/validation` are artificial and small. Hostile archives are described by reviewed JSON recipes and generated only inside a test-owned temporary directory. Tests synthesize any required short WAV; copyrighted music and real user beatmaps are excluded from the repository.

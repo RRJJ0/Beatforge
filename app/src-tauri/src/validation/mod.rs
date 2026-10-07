@@ -8,6 +8,7 @@ pub mod archive;
 pub mod limits;
 pub mod osu;
 pub mod pipeline;
+pub mod repair;
 pub mod types;
 
 pub use archive::{
@@ -16,9 +17,10 @@ pub use archive::{
 };
 pub use limits::ValidationLimits;
 pub use pipeline::validate_candidate;
+pub use repair::{OsuRepairResult, normalize_osu_bytes, repair_extracted_archive};
 pub use types::{
-    BeatmapStatistics, IssueSeverity, RepairRecord, ValidationCode, ValidationIssue,
-    ValidationReport, ValidationStatus,
+    BeatmapStatistics, IssueSeverity, RepairManifest, RepairManifestStatus, RepairRecord,
+    ValidationCode, ValidationIssue, ValidationReport, ValidationStatus,
 };
 
 #[cfg(test)]

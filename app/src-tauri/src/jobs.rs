@@ -1,6 +1,6 @@
 use crate::{
     protocol::StartJobInput,
-    validation::{IssueSeverity, ValidationReport},
+    validation::{IssueSeverity, ValidationReport, ValidationStatus},
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -215,7 +215,12 @@ pub fn finish_validation(
         .filter(|issue| issue.severity == IssueSeverity::Error)
         .count();
     let (status, stage, error_message) = if report.can_complete() {
-        let stage = if warning_count == 0 {
+        let stage = if report.status == ValidationStatus::Repaired {
+            format!(
+                "Completed after {} non-destructive repair(s)",
+                report.repairs.len()
+            )
+        } else if warning_count == 0 {
             "Completed and validated".to_string()
         } else {
             format!("Completed with {warning_count} validation warning(s)")
@@ -276,7 +281,7 @@ pub fn mark_interrupted(connection: &Connection) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::validation::{
-        IssueSeverity, ValidationCode, ValidationIssue, ValidationStatus,
+        IssueSeverity, ValidationCode, ValidationIssue,
         types::{VALIDATION_SCHEMA_VERSION, VALIDATOR_VERSION},
     };
 

@@ -573,7 +573,7 @@ Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後�
 - [x] 6.3：實作 timing、hit objects、座標與 slider 語意驗證。
 - [x] 6.4：實作 `.osz` 安全解包、完整性驗證與重新封裝。
 - [x] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
-- [ ] 6.6：建立非破壞式修正流程與 repair manifest。
+- [x] 6.6：建立非破壞式修正流程與 repair manifest。
 - [ ] 6.7：計算 difficulty statistics 並呈現結果摘要。
 - [ ] 6.8：完成 osu! 開啟／匯入流程與實體驗收。
 
@@ -608,6 +608,12 @@ Rust archive boundary 使用固定 `zip 8.6.0` 且只啟用 deflate 支援。pre
 正式 worker 的 `completed` 事件現在只表示推論結束。Rust 會先將任務切換為 `validating`，確認候選檔仍位於受管理的 job directory 且為 regular `.osu`／`.osz`，再將原檔移入不可覆寫的 `raw`。單一 `.osu` 會依序經過 6.2 與 6.3；`.osz` 則解至一次性的 `working/extracted`，執行 6.4 的 archive、beatmap 與資源 reference 驗證，完成後移除 working data。
 
 沒有 error 的候選檔會以 partial file、flush 與同目錄原子 rename 建立 `validated` 交付副本；含 warning 的報告可成為 `valid_with_warnings`，任何 error 都會進入 `validation_failed`，保留 `raw` 但不建立或發布 output path。`validation-report.json` 以相同方式原子寫入，SQLite schema v3 同步保存完整 report JSON，job API 與 Vue 型別可在重新啟動後還原狀態、issue 數量及 validated artifact identity。若程式在 validation 中被關閉，啟動復原會標示為 `interrupted` 並保留已建立的驗證 artifacts，不再把推論成功直接當作產品成功。
+
+#### 6.6 非破壞式自動修正
+
+repair engine 採 deny-by-default，只會移除 UTF-8 BOM、將 CRLF／CR 正規化成 LF、補上缺少的 final newline、整理 Metadata 已知欄位的外圍空白、正規化可明確解析且數值等價的 General／Editor／Metadata／Difficulty scalar spelling，以及在隔離解包時將安全的 archive path separator 轉為穩定名稱。TimingPoints、HitObjects、BPM、座標、物件型別、slider geometry、difficulty 數值本身及缺少的 metadata 內容都不會被猜測或修改；空白 Creator 仍只回報 warning，不能由程式代填。
+
+任何實際修正都只發生在 `working`，完成後重新執行完整 parser、semantic、archive 與 referenced-asset validation。通過時產生新的 `validated` artifact、`repaired` report status 與 `repair-manifest.json`；manifest 逐項記錄 code、section／field、非敏感 before／after 描述、原因及 UTC 完成時間。若重驗仍失敗，incomplete validated output 與 working data 會移除，manifest 標記 `failed`，job 保持不可完成；`raw` bytes 在成功與失敗路徑都不會改動。
 
 工作項目：
 
