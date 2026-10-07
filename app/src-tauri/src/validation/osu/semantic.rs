@@ -24,7 +24,7 @@ pub struct ValidatedTimingPoint {
     pub time_ms: f64,
     pub meter: u32,
     pub sample_set: u8,
-    pub sample_index: u32,
+    pub sample_index: i32,
     pub volume: u8,
     pub effects: u32,
     pub point: TimingPointKind,
@@ -230,7 +230,7 @@ fn parse_timing_point(
         raw.line,
         issues,
     )?;
-    let sample_index = parse_value::<u32>(
+    let sample_index = parse_value::<i32>(
         raw.fields.get(4).map(String::as_str),
         "Sample index",
         code,
@@ -787,6 +787,24 @@ mod tests {
                 slider_velocity_multiplier
             } if slider_velocity_multiplier == 2.0
         ));
+    }
+
+    #[test]
+    fn accepts_negative_legacy_sample_indices() {
+        let mut beatmap = parsed_fixture("valid/minimal-standard.osu");
+        beatmap.timing_points[0] = RawTimingPoint {
+            line: 100,
+            raw: "0,500,4,2,-1,70,1,0".into(),
+            fields: ["0", "500", "4", "2", "-1", "70", "1", "0"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        };
+
+        let result = validate_semantics(&beatmap, SemanticValidationContext::default());
+
+        assert!(!result.has_errors(), "{:?}", result.issues);
+        assert_eq!(result.beatmap.timing_points[0].sample_index, -1);
     }
 
     #[test]

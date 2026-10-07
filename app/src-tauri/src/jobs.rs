@@ -25,6 +25,20 @@ pub struct JobRecord {
     pub validation_report: Option<ValidationReport>,
 }
 
+fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| error.to_string())?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?;
+    Ok(columns
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .any(|existing| existing == column))
+}
+
 pub fn migrate(connection: &Connection) -> Result<(), String> {
     let applied: Option<i64> = connection
         .query_row(
@@ -52,22 +66,23 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             )
             .map_err(|error| error.to_string())?;
     }
-    let validation_applied: Option<i64> = connection
-        .query_row(
-            "SELECT version FROM schema_migrations WHERE version = 3",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    if validation_applied.is_none() {
+    // Migration versions are shared with the package tables. Older databases
+    // may therefore contain version 3 even though this jobs column was never
+    // added. The schema itself is the source of truth for this additive repair.
+    if !has_column(connection, "jobs", "validation_report_json")? {
         connection
-            .execute_batch(
-                "ALTER TABLE jobs ADD COLUMN validation_report_json TEXT;
-                 INSERT INTO schema_migrations(version) VALUES (3);",
+            .execute(
+                "ALTER TABLE jobs ADD COLUMN validation_report_json TEXT",
+                [],
             )
             .map_err(|error| error.to_string())?;
     }
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (3)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -337,6 +352,22 @@ mod tests {
             "same-input-settings"
         );
         assert_eq!(list(&connection).expect("jobs load").len(), 1);
+    }
+
+    #[test]
+    fn repairs_validation_column_when_shared_version_three_is_already_marked() {
+        let connection = version_one_database();
+        connection
+            .execute_batch(
+                "INSERT INTO schema_migrations(version) VALUES (3);
+                 INSERT INTO schema_migrations(version) VALUES (4);",
+            )
+            .expect("package migration markers");
+
+        migrate(&connection).expect("jobs schema is repaired");
+        migrate(&connection).expect("repair is idempotent");
+
+        assert!(has_column(&connection, "jobs", "validation_report_json").unwrap());
     }
 
     #[test]
