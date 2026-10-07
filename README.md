@@ -489,7 +489,7 @@ MVP 鎖定官方 `OliBomby/Mapperatorinator-v32` repository 的 commit `74f22583
 - 回報 Python、PyTorch、CUDA、FFmpeg、Mapperatorinator 與模型版本。
 - 保留 mock worker，供沒有 GPU 的自動化測試使用。
 
-正式 bootstrap 以 embedded resource 隨應用程式發布，啟動前會原子部署到 application-managed `runtime/worker/3/beatforge_worker.py`，並由私有 Python 的 isolated mode 執行。worker stdin／stdout 只接受 protocol v1 的單行 JSON，單則訊息上限 64 KiB；upstream import、traceback 與其他診斷一律重新導向 stderr，Rust 最多保存 256 KiB 至 `logs/production-worker.log`，避免污染 JSON Lines channel。
+正式 bootstrap 以 embedded resource 隨應用程式發布，啟動前會原子部署到 application-managed `runtime/worker/4/beatforge_worker.py`，並由私有 Python 的 isolated mode 執行。worker stdin／stdout 只接受 protocol v1 的單行 JSON，單則訊息上限 64 KiB；upstream import、traceback 與其他診斷一律重新導向 stderr，Rust 最多保存 256 KiB 至 `logs/production-worker.log`，避免污染 JSON Lines channel。
 
 Models 畫面的 `Worker health` 會啟動一次最長 90 秒的獨立 health process，確認 Python executable、PyTorch／CUDA、受管理 FFmpeg、Mapperatorinator source marker 與五個固定 inference callables，以及 V32 模型的四個必要檔案。回報只檢查模型 identity 與檔案存在性，不會在 5.3 載入約 830 MB 權重。health report 包含 worker／protocol、Python、PyTorch、CUDA、GPU、FFmpeg、Mapperatorinator commit 與 model version；任何缺少項目會回傳結構化 errors 並顯示於 UI。
 

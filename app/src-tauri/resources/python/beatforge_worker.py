@@ -23,18 +23,18 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "3"
+WORKER_VERSION = "4"
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
 def install_untimed_group_guard() -> dict[str, int]:
     """Discard incomplete generated groups that have no absolute time token.
 
-    V32 emits type-first event groups. If generation ends after an object type
-    but before its TIME_SHIFT token, Mapperatorinator's Group dataclass leaves
-    the time at its 0 ms default and the postprocessor serializes that object at
-    the end of the map. There is no timestamp to recover, so the only
-    deterministic treatment is to omit the incomplete group.
+    If generation emits an object group without a TIME_SHIFT token,
+    Mapperatorinator's Group dataclass leaves the time at its 0 ms default and
+    the postprocessor serializes that object into the map. There is no timestamp
+    to recover, so the only deterministic treatment is to omit the incomplete
+    group. The same boundary also rejects explicit time regressions.
     """
     from osuT5.osuT5.dataset import data_utils
     from osuT5.osuT5.inference import postprocessor
@@ -53,7 +53,7 @@ def install_untimed_group_guard() -> dict[str, int]:
             event_times=event_times,
             types_first=types_first,
         )
-        if event_times is not None or not types_first:
+        if event_times is not None:
             return groups, group_indices
 
         kept_groups = []
