@@ -30,7 +30,7 @@ Production commands use snake-case protocol fields and contain only adapter-appr
 ## Completed
 
 ```json
-{"type":"completed","protocol_version":1,"job_id":"BF-123","output_path":"C:\\...\\result.osz","warnings":[],"provenance":{"schema_version":1,"job_id":"BF-123","reproduction_key":"sha256...","source":{"mapperatorinator_commit":"0e2b...","worker_version":"2","protocol_version":1},"model":{"package":"mapperatorinator-v32-standard","version":"32..."},"runtime":{"pytorch_version":"2.10.0+cu128","cuda_runtime":"12.8","device":"cuda","precision":"fp32"},"parameters":{"seed":12345},"input":{"audio":{"sha256":"..."}},"output":{"sha256":"..."},"timing":{"elapsed_seconds":123.4},"known_limitations":["osu!standard only"]}}
+{"type":"completed","protocol_version":1,"job_id":"BF-123","output_path":"C:\\...\\result.osz","warnings":[],"provenance":{"schema_version":1,"job_id":"BF-123","reproduction_key":"sha256...","source":{"mapperatorinator_commit":"0e2b...","worker_version":"3","protocol_version":1},"model":{"package":"mapperatorinator-v32-standard","version":"32..."},"runtime":{"pytorch_version":"2.10.0+cu128","cuda_runtime":"13.0","device":"cuda","precision":"bf16"},"parameters":{"seed":12345},"input":{"audio":{"sha256":"..."}},"output":{"sha256":"..."},"timing":{"elapsed_seconds":123.4},"known_limitations":["osu!standard only"]}}
 ```
 
 `provenance` is required for the production worker and omitted by the mock worker. Rust stores it in the job's existing `result_json` column before changing the job to `completed`. A missing or unpersistable production record is a terminal protocol failure.

@@ -23,7 +23,7 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "2"
+WORKER_VERSION = "3"
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
@@ -40,7 +40,10 @@ def install_untimed_group_guard() -> dict[str, int]:
     from osuT5.osuT5.inference import postprocessor
 
     original_get_groups = postprocessor.get_groups
-    stats = {"dropped_untimed_groups": 0}
+    stats = {
+        "dropped_untimed_groups": 0,
+        "dropped_out_of_order_groups": 0,
+    }
 
     def guarded_get_groups(
         events: list[Any], *, event_times=None, types_first: bool = False
@@ -55,16 +58,24 @@ def install_untimed_group_guard() -> dict[str, int]:
 
         kept_groups = []
         kept_indices = []
+        last_absolute_time: int | None = None
         for group, indices in zip(groups, group_indices):
             has_absolute_time = any(
                 events[index].type == data_utils.EventType.TIME_SHIFT
                 for index in indices
             )
-            if has_absolute_time:
-                kept_groups.append(group)
-                kept_indices.append(indices)
-            else:
+            if not has_absolute_time:
                 stats["dropped_untimed_groups"] += 1
+                continue
+            if (
+                last_absolute_time is not None
+                and group.time < last_absolute_time
+            ):
+                stats["dropped_out_of_order_groups"] += 1
+                continue
+            kept_groups.append(group)
+            kept_indices.append(indices)
+            last_absolute_time = group.time
         return kept_groups, kept_indices
 
     postprocessor.get_groups = guarded_get_groups
@@ -770,10 +781,18 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             )
 
     dropped_untimed_groups = untimed_group_stats["dropped_untimed_groups"]
+    dropped_out_of_order_groups = untimed_group_stats[
+        "dropped_out_of_order_groups"
+    ]
     if dropped_untimed_groups:
         log(
             "Discarded generated event groups without absolute time tokens: "
             f"{dropped_untimed_groups}"
+        )
+    if dropped_out_of_order_groups:
+        log(
+            "Discarded generated event groups whose absolute time moved backwards: "
+            f"{dropped_out_of_order_groups}"
         )
 
     progress(job_id, "validating_output", 95, "Checking the generated output path")
@@ -841,6 +860,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         ],
         "output_sanitization": {
             "dropped_untimed_groups": dropped_untimed_groups,
+            "dropped_out_of_order_groups": dropped_out_of_order_groups,
         },
     }
     return result_path, provenance
@@ -855,12 +875,21 @@ def start_job(command: dict[str, Any]) -> int:
         dropped_untimed_groups = provenance["output_sanitization"][
             "dropped_untimed_groups"
         ]
+        dropped_out_of_order_groups = provenance["output_sanitization"][
+            "dropped_out_of_order_groups"
+        ]
         warnings = []
         if dropped_untimed_groups:
             warnings.append(
                 "Discarded "
                 f"{dropped_untimed_groups} incomplete generated event group(s) "
                 "without absolute time tokens."
+            )
+        if dropped_out_of_order_groups:
+            warnings.append(
+                "Discarded "
+                f"{dropped_out_of_order_groups} generated event group(s) "
+                "whose absolute time moved backwards."
             )
         send(
             {
