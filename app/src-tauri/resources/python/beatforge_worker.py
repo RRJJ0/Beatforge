@@ -23,55 +23,47 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "5"
+WORKER_VERSION = "6"
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
-def install_untimed_group_guard() -> dict[str, int]:
-    """Discard incomplete generated groups that have no absolute time token.
+def install_generated_group_time_guard() -> dict[str, int]:
+    """Resolve generated group times and discard explicit time regressions.
 
-    If generation emits an object group without a TIME_SHIFT token,
-    Mapperatorinator's Group dataclass leaves the time at its 0 ms default and
-    the postprocessor serializes that object into the map. There is no timestamp
-    to recover, so the only deterministic treatment is to omit the incomplete
-    group. The same boundary also rejects explicit time regressions.
+    Mapperatorinator permits event groups to share the preceding TIME_SHIFT and
+    interpolates untimed slider components. Passing no event_times to get_groups
+    leaves those groups at the dataclass's 0 ms default, so resolve them with the
+    upstream timing rules before checking their order.
     """
     from osuT5.osuT5.dataset import data_utils
     from osuT5.osuT5.inference import postprocessor
 
     original_get_groups = postprocessor.get_groups
-    stats = {
-        "dropped_untimed_groups": 0,
-        "dropped_out_of_order_groups": 0,
-    }
+    stats = {"dropped_out_of_order_groups": 0}
 
     def guarded_get_groups(
         events: list[Any], *, event_times=None, types_first: bool = False
     ):
+        resolved_event_times = event_times
+        if resolved_event_times is None:
+            resolved_event_times = []
+            data_utils.update_event_times(
+                events,
+                resolved_event_times,
+                types_first=types_first,
+            )
+
         groups, group_indices = original_get_groups(
             events,
-            event_times=event_times,
+            event_times=resolved_event_times,
             types_first=types_first,
         )
-        if event_times is not None:
-            return groups, group_indices
 
         kept_groups = []
         kept_indices = []
         last_absolute_time: int | None = None
         for group, indices in zip(groups, group_indices):
-            if group.event_type not in data_utils.TIMED_EVENTS:
-                kept_groups.append(group)
-                kept_indices.append(indices)
-                continue
-            has_absolute_time = any(
-                events[index].type == data_utils.EventType.TIME_SHIFT
-                for index in indices
-            )
-            if not has_absolute_time:
-                stats["dropped_untimed_groups"] += 1
-                continue
-            if (
+            if group.event_type in data_utils.TIMED_EVENTS and (
                 last_absolute_time is not None
                 and group.time < last_absolute_time
             ):
@@ -79,7 +71,8 @@ def install_untimed_group_guard() -> dict[str, int]:
                 continue
             kept_groups.append(group)
             kept_indices.append(indices)
-            last_absolute_time = group.time
+            if group.event_type in data_utils.TIMED_EVENTS:
+                last_absolute_time = group.time
         return kept_groups, kept_indices
 
     postprocessor.get_groups = guarded_get_groups
@@ -645,7 +638,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     ):
         with contextlib.redirect_stdout(sys.stderr):
             inference = importlib.import_module("inference")
-            untimed_group_stats = install_untimed_group_guard()
+            generated_group_stats = install_generated_group_time_guard()
 
     with loading_step(job_id, "loading_inference_config", 10, "Loading inference configuration"):
         with contextlib.redirect_stdout(sys.stderr):
@@ -784,15 +777,9 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
                 verbose=True,
             )
 
-    dropped_untimed_groups = untimed_group_stats["dropped_untimed_groups"]
-    dropped_out_of_order_groups = untimed_group_stats[
+    dropped_out_of_order_groups = generated_group_stats[
         "dropped_out_of_order_groups"
     ]
-    if dropped_untimed_groups:
-        log(
-            "Discarded generated event groups without absolute time tokens: "
-            f"{dropped_untimed_groups}"
-        )
     if dropped_out_of_order_groups:
         log(
             "Discarded generated event groups whose absolute time moved backwards: "
@@ -863,7 +850,6 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             "fast decoder disabled",
         ],
         "output_sanitization": {
-            "dropped_untimed_groups": dropped_untimed_groups,
             "dropped_out_of_order_groups": dropped_out_of_order_groups,
         },
     }
@@ -876,19 +862,10 @@ def start_job(command: dict[str, Any]) -> int:
         raise ValueError("start_job requires a job_id")
     try:
         result_path, provenance = run_inference(command, job_id)
-        dropped_untimed_groups = provenance["output_sanitization"][
-            "dropped_untimed_groups"
-        ]
         dropped_out_of_order_groups = provenance["output_sanitization"][
             "dropped_out_of_order_groups"
         ]
         warnings = []
-        if dropped_untimed_groups:
-            warnings.append(
-                "Discarded "
-                f"{dropped_untimed_groups} incomplete generated event group(s) "
-                "without absolute time tokens."
-            )
         if dropped_out_of_order_groups:
             warnings.append(
                 "Discarded "

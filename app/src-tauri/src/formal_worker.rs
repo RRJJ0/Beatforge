@@ -11,7 +11,7 @@ use std::{
 };
 
 const WORKER_SOURCE: &str = include_str!("../resources/python/beatforge_worker.py");
-const WORKER_VERSION: &str = "5";
+const WORKER_VERSION: &str = "6";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 
@@ -275,11 +275,11 @@ mod tests {
     #[test]
     fn parses_versioned_health_message() {
         let health = parse_health(
-            r#"{"type":"health","protocol_version":1,"worker_version":"5","ready":true,"python_version":"3.10.21","python_executable":"python.exe","pytorch_version":"2.10.0","cuda_runtime":"13.0","cuda_available":true,"gpu_name":"GPU","ffmpeg_version":"7.0","ffmpeg_executable":"ffmpeg.exe","mapperatorinator_commit":"abc","model_version":"32.test","model_path":"model","errors":[]}"#,
+            r#"{"type":"health","protocol_version":1,"worker_version":"6","ready":true,"python_version":"3.10.21","python_executable":"python.exe","pytorch_version":"2.10.0","cuda_runtime":"13.0","cuda_available":true,"gpu_name":"GPU","ffmpeg_version":"7.0","ffmpeg_executable":"ffmpeg.exe","mapperatorinator_commit":"abc","model_version":"32.test","model_path":"model","errors":[]}"#,
         )
         .unwrap();
         assert!(health.ready);
-        assert_eq!(health.worker_version, "5");
+        assert_eq!(health.worker_version, "6");
     }
 
     #[test]
@@ -287,7 +287,7 @@ mod tests {
         assert!(parse_health(r#"{"type":"progress"}"#).is_err());
         assert!(
             parse_health(
-                r#"{"type":"health","protocol_version":99,"worker_version":"5","ready":false,"python_version":"3.10","python_executable":"python.exe","cuda_available":false,"errors":[]}"#,
+                r#"{"type":"health","protocol_version":99,"worker_version":"6","ready":false,"python_version":"3.10","python_executable":"python.exe","cuda_available":false,"errors":[]}"#,
             )
             .is_err()
         );
@@ -318,10 +318,9 @@ mod tests {
         assert!(WORKER_SOURCE.contains("CANCEL_REQUESTED.is_set()"));
         assert!(WORKER_SOURCE.contains("JOB_CANCELLED"));
         assert!(WORKER_SOURCE.contains("Beatmap inference is still running"));
-        assert!(WORKER_SOURCE.contains("install_untimed_group_guard"));
-        assert!(WORKER_SOURCE.contains("dropped_untimed_groups"));
+        assert!(WORKER_SOURCE.contains("install_generated_group_time_guard"));
+        assert!(WORKER_SOURCE.contains("update_event_times"));
         assert!(WORKER_SOURCE.contains("dropped_out_of_order_groups"));
-        assert!(WORKER_SOURCE.contains("EventType.TIME_SHIFT"));
         assert!(WORKER_SOURCE.contains("data_utils.TIMED_EVENTS"));
     }
 
