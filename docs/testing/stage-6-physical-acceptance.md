@@ -27,6 +27,7 @@ Run this checklist on a Windows machine with Beatforge, osu! stable and/or osu!l
 - [ ] Disable automatic import and generate or reuse a completed `.osz` job.
 - [ ] Click **Import into osu!**. Confirm osu! stable starts or receives focus and begins importing the package.
 - [ ] Confirm the beatmap appears in the song list and can be opened in the Editor.
+- [ ] Confirm osu! may consume the temporary `cache/osu-import` handoff while the original `jobs/<job-id>/validated/` artifact remains available for repeated import.
 - [ ] In the Editor, verify audio playback, timing alignment, hit objects, seeking, difficulty metadata, and any packaged background or samples.
 - [ ] Confirm osu! does not report a corrupt archive, missing audio, unsupported mode, or unreadable beatmap.
 

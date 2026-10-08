@@ -625,7 +625,7 @@ repair engine 採 deny-by-default，只會移除 UTF-8 BOM、將 CRLF／CR 正�
 
 Jobs UI 對 completed 且具有 validated artifact 的任務提供 **Show validated output** 與 **Import into osu!**。每次操作都會由 Rust 重新讀取 SQLite，要求 job 為 completed、report 可交付、report job identity 一致，並比對 stored output、`validated/<filename>` relative path 與 canonical filesystem path；symlink、`raw`／`working`、外部路徑、非 `.osu`／`.osz` 或已遺失檔案都會拒絕，不信任前端傳入實體路徑。
 
-Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的執行檔，其次使用偵測到的 stable／lazer executable。手動匯入在找不到 executable 時可交給 Windows `.osu`／`.osz` file association；自動匯入只接受已驗證 executable，不使用 association fallback，並且只在完整 validation 成功後啟動。實機 stable／lazer 驗收清單位於 `docs/testing/stage-6-physical-acceptance.md`；完成該清單前 6.8 維持待驗收狀態。
+Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的執行檔，其次使用偵測到的 stable／lazer executable。手動匯入在找不到 executable 時可交給 Windows `.osu`／`.osz` file association；自動匯入只接受已驗證 executable，不使用 association fallback，並且只在完整 validation 成功後啟動。stable／lazer importer 可能消耗傳入的檔案，因此手動與自動匯入都會先在 application-managed `cache/osu-import` 建立唯一 handoff 副本，只將副本交給 osu!；正式 `validated` artifact 保持不變，未被 importer 消耗且超過 24 小時的副本會在後續啟動時清理。實機 stable／lazer 驗收清單位於 `docs/testing/stage-6-physical-acceptance.md`；完成該清單前 6.8 維持待驗收狀態。
 
 工作項目：
 

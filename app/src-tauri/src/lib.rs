@@ -291,7 +291,14 @@ fn import_job_output(
 ) -> Result<osu_integration::ImportLaunch, String> {
     let artifact = validated_job_artifact(&app, &job_id)?;
     let executable = selected_osu_executable(&app)?;
-    osu_integration::import_artifact(&artifact, executable.as_deref(), true)
+    let paths = build_paths(&app)?;
+    osu_integration::import_artifact(
+        &artifact,
+        Path::new(&paths.cache),
+        &job_id,
+        executable.as_deref(),
+        true,
+    )
 }
 
 pub(crate) fn try_auto_import(app: &AppHandle, job_id: &str) -> Result<(), String> {
@@ -307,7 +314,14 @@ pub(crate) fn try_auto_import(app: &AppHandle, job_id: &str) -> Result<(), Strin
         .ok_or_else(|| {
             "Automatic import skipped because no osu! executable was detected".to_string()
         })?;
-    osu_integration::import_artifact(&artifact, Some(&executable), false)?;
+    let paths = build_paths(app)?;
+    osu_integration::import_artifact(
+        &artifact,
+        Path::new(&paths.cache),
+        job_id,
+        Some(&executable),
+        false,
+    )?;
     Ok(())
 }
 
@@ -1154,7 +1168,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             mapperatorinator_lock::validate_builtin().map_err(std::io::Error::other)?;
-            let (connection, _) = open_database(app.handle()).map_err(std::io::Error::other)?;
+            let (connection, paths) = open_database(app.handle()).map_err(std::io::Error::other)?;
+            if let Err(error) =
+                osu_integration::cleanup_stale_import_handoffs(Path::new(&paths.cache))
+            {
+                log::warn!("Could not clean stale osu! import handoffs: {error}");
+            }
             let abandoned_jobs = jobs::active_ids(&connection).map_err(std::io::Error::other)?;
             jobs::mark_interrupted(&connection).map_err(std::io::Error::other)?;
             for id in abandoned_jobs {

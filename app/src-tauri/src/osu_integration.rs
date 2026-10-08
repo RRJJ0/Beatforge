@@ -2,9 +2,16 @@ use crate::validation::{ValidationReport, limits::VALIDATED_DIRECTORY};
 use serde::Serialize;
 use std::{
     fs,
+    fs::OpenOptions,
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+const IMPORT_HANDOFF_DIRECTORY: &str = "osu-import";
+const IMPORT_HANDOFF_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+static IMPORT_HANDOFF_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +31,121 @@ fn valid_job_id(job_id: &str) -> bool {
         && job_id != ".."
         && !job_id.contains(['/', '\\'])
         && Path::new(job_id).components().count() == 1
+}
+
+fn import_handoff_root(cache_root: &Path) -> Result<PathBuf, String> {
+    let cache_root = cache_root
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the managed cache directory: {error}"))?;
+    let handoff_root = cache_root.join(IMPORT_HANDOFF_DIRECTORY);
+    fs::create_dir_all(&handoff_root)
+        .map_err(|error| format!("Could not create the osu! import handoff directory: {error}"))?;
+    let handoff_root = handoff_root
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the osu! import handoff directory: {error}"))?;
+    if handoff_root.parent() != Some(cache_root.as_path()) {
+        return Err("The osu! import handoff directory escaped the managed cache".into());
+    }
+    Ok(handoff_root)
+}
+
+fn create_import_handoff(
+    cache_root: &Path,
+    job_id: &str,
+    artifact: &Path,
+) -> Result<PathBuf, String> {
+    if !valid_job_id(job_id) {
+        return Err("Invalid managed job identity".into());
+    }
+    let metadata = fs::symlink_metadata(artifact)
+        .map_err(|error| format!("Could not inspect the validated artifact: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("The validated artifact is not a regular managed file".into());
+    }
+    let extension = artifact
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(extension.as_str(), "osu" | "osz") {
+        return Err("Only validated .osu and .osz files can be imported".into());
+    }
+
+    let handoff_root = import_handoff_root(cache_root)?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = IMPORT_HANDOFF_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let name = format!("{job_id}-{timestamp}-{sequence}.{extension}");
+    let destination = handoff_root.join(name);
+    let staging = destination.with_extension(format!("{extension}.partial"));
+
+    let copy_result = (|| {
+        fs::copy(artifact, &staging)
+            .map_err(|error| format!("Could not copy the osu! import handoff: {error}"))?;
+        let staged = OpenOptions::new()
+            .write(true)
+            .open(&staging)
+            .map_err(|error| format!("Could not open the osu! import handoff: {error}"))?;
+        staged
+            .sync_all()
+            .map_err(|error| format!("Could not flush the osu! import handoff: {error}"))?;
+        drop(staged);
+        fs::rename(&staging, &destination)
+            .map_err(|error| format!("Could not publish the osu! import handoff: {error}"))?;
+        let copied = fs::symlink_metadata(&destination)
+            .map_err(|error| format!("Could not inspect the osu! import handoff: {error}"))?;
+        if !copied.is_file() || copied.file_type().is_symlink() || copied.len() != metadata.len() {
+            return Err("The osu! import handoff copy is incomplete".into());
+        }
+        let destination = destination
+            .canonicalize()
+            .map_err(|error| format!("Could not resolve the osu! import handoff: {error}"))?;
+        if destination.parent() != Some(handoff_root.as_path()) {
+            return Err("The osu! import handoff escaped the managed cache".into());
+        }
+        Ok(destination)
+    })();
+    if copy_result.is_err() {
+        let _ = fs::remove_file(&staging);
+        let _ = fs::remove_file(&destination);
+    }
+    copy_result
+}
+
+fn cleanup_import_handoffs_older_than(
+    cache_root: &Path,
+    max_age: Duration,
+) -> Result<usize, String> {
+    let handoff_root = import_handoff_root(cache_root)?;
+    let mut removed = 0;
+    for entry in fs::read_dir(&handoff_root)
+        .map_err(|error| format!("Could not inspect osu! import handoffs: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Could not inspect an import handoff: {error}"))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("Could not inspect an import handoff: {error}"))?;
+        if !metadata.is_file() || entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+            continue;
+        }
+        let age = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.elapsed().ok());
+        if age.is_some_and(|age| age >= max_age) {
+            fs::remove_file(entry.path())
+                .map_err(|error| format!("Could not remove a stale import handoff: {error}"))?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+pub fn cleanup_stale_import_handoffs(cache_root: &Path) -> Result<usize, String> {
+    cleanup_import_handoffs_older_than(cache_root, IMPORT_HANDOFF_MAX_AGE)
 }
 
 pub fn resolve_validated_artifact(
@@ -158,42 +280,54 @@ pub fn reveal_artifact(artifact: &Path) -> Result<(), String> {
 
 pub fn import_artifact(
     artifact: &Path,
+    cache_root: &Path,
+    job_id: &str,
     executable: Option<&Path>,
     allow_file_association: bool,
 ) -> Result<ImportLaunch, String> {
     #[cfg(windows)]
     {
+        let handoff = create_import_handoff(cache_root, job_id, artifact)?;
         if let Some(executable) = executable {
             let mut command = Command::new(executable);
-            command.arg(artifact);
+            command.arg(&handoff);
             hidden(&mut command);
-            command
-                .spawn()
-                .map_err(|error| format!("Could not start osu!: {error}"))?;
+            if let Err(error) = command.spawn() {
+                let _ = fs::remove_file(&handoff);
+                return Err(format!("Could not start osu!: {error}"));
+            }
             return Ok(ImportLaunch {
                 method: "executable".into(),
                 application: Some(path_string(executable)),
-                artifact: path_string(artifact),
+                artifact: path_string(&handoff),
             });
         }
         if !allow_file_association {
+            let _ = fs::remove_file(&handoff);
             return Err("No usable osu! executable was detected".into());
         }
         let mut command = Command::new("explorer.exe");
-        command.arg(artifact);
+        command.arg(&handoff);
         hidden(&mut command);
-        command
-            .spawn()
-            .map_err(|error| format!("Could not open the osu! file association: {error}"))?;
+        if let Err(error) = command.spawn() {
+            let _ = fs::remove_file(&handoff);
+            return Err(format!("Could not open the osu! file association: {error}"));
+        }
         Ok(ImportLaunch {
             method: "file_association".into(),
             application: None,
-            artifact: path_string(artifact),
+            artifact: path_string(&handoff),
         })
     }
     #[cfg(not(windows))]
     {
-        let _ = (artifact, executable, allow_file_association);
+        let _ = (
+            artifact,
+            cache_root,
+            job_id,
+            executable,
+            allow_file_association,
+        );
         Err("Importing into osu! is currently supported on Windows only".into())
     }
 }
@@ -310,6 +444,48 @@ mod tests {
             select_osu_executable(Some(root.join("other.exe").to_str().unwrap()), Vec::new())
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn import_handoff_is_a_managed_copy_and_preserves_the_validated_artifact() {
+        let root = temporary_root("handoff");
+        let cache = root.join("cache");
+        fs::create_dir(&cache).unwrap();
+        let validated = root.join("validated.osz");
+        fs::write(&validated, b"validated beatmap").unwrap();
+
+        let handoff = create_import_handoff(&cache, "BF-TEST", &validated).unwrap();
+        assert!(validated.is_file());
+        assert_eq!(fs::read(&validated).unwrap(), fs::read(&handoff).unwrap());
+        assert_eq!(
+            handoff.parent().unwrap(),
+            cache.join(IMPORT_HANDOFF_DIRECTORY).canonicalize().unwrap()
+        );
+        assert_ne!(handoff, validated.canonicalize().unwrap());
+
+        assert_eq!(
+            cleanup_import_handoffs_older_than(&cache, Duration::ZERO).unwrap(),
+            1
+        );
+        assert!(!handoff.exists());
+        assert!(validated.is_file());
+        assert_eq!(fs::read(&validated).unwrap(), b"validated beatmap");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn import_handoff_rejects_invalid_identity_and_file_type() {
+        let root = temporary_root("handoff-reject");
+        let cache = root.join("cache");
+        fs::create_dir(&cache).unwrap();
+        let unsupported = root.join("result.zip");
+        fs::write(&unsupported, b"archive").unwrap();
+
+        assert!(create_import_handoff(&cache, "../outside", &unsupported).is_err());
+        assert!(create_import_handoff(&cache, "BF-TEST", &unsupported).is_err());
+
         fs::remove_dir_all(root).unwrap();
     }
 }
