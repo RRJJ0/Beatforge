@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -23,7 +24,7 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "7"
+WORKER_VERSION = "8"
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
@@ -42,9 +43,50 @@ def install_generated_group_guard() -> dict[str, int]:
 
     original_get_groups = postprocessor.get_groups
     stats = {
+        "defaulted_non_positive_slider_lengths": 0,
         "defaulted_non_positive_slider_svs": 0,
         "dropped_out_of_order_groups": 0,
     }
+
+    original_timing_point_at = postprocessor.Postprocessor.timing_point_at
+    original_calc_length = postprocessor.Postprocessor.calc_length
+    slider_length_state = {"current_sv": 1.0}
+
+    def tracked_timing_point_at(time, timing_points):
+        timing_point = original_timing_point_at(time, timing_points)
+        slider_length_state["current_sv"] = (
+            1.0
+            if timing_point.parent is None
+            else -100 / timing_point.ms_per_beat
+        )
+        return timing_point
+
+    def guarded_calc_length(
+        self, sv, span_duration, redline, slider_multiplier
+    ):
+        length = original_calc_length(
+            self,
+            sv,
+            span_duration,
+            redline,
+            slider_multiplier,
+        )
+        if math.isfinite(length) and length > 0:
+            return length
+
+        fallback_length = original_calc_length(
+            self,
+            slider_length_state["current_sv"],
+            span_duration,
+            redline,
+            slider_multiplier,
+        )
+        if not math.isfinite(fallback_length) or fallback_length <= 0:
+            raise RuntimeError(
+                "Mapperatorinator could not calculate a positive slider length"
+            )
+        stats["defaulted_non_positive_slider_lengths"] += 1
+        return fallback_length
 
     def guarded_get_groups(
         events: list[Any], *, event_times=None, types_first: bool = False
@@ -88,6 +130,10 @@ def install_generated_group_guard() -> dict[str, int]:
         return kept_groups, kept_indices
 
     postprocessor.get_groups = guarded_get_groups
+    postprocessor.Postprocessor.timing_point_at = staticmethod(
+        tracked_timing_point_at
+    )
+    postprocessor.Postprocessor.calc_length = guarded_calc_length
     return stats
 
 
@@ -789,12 +835,20 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
                 verbose=True,
             )
 
+    defaulted_non_positive_slider_lengths = generated_group_stats[
+        "defaulted_non_positive_slider_lengths"
+    ]
     defaulted_non_positive_slider_svs = generated_group_stats[
         "defaulted_non_positive_slider_svs"
     ]
     dropped_out_of_order_groups = generated_group_stats[
         "dropped_out_of_order_groups"
     ]
+    if defaulted_non_positive_slider_lengths:
+        log(
+            "Defaulted non-positive generated slider length calculations: "
+            f"{defaulted_non_positive_slider_lengths}"
+        )
     if defaulted_non_positive_slider_svs:
         log(
             "Defaulted non-positive generated slider velocity values: "
@@ -870,6 +924,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             "fast decoder disabled",
         ],
         "output_sanitization": {
+            "defaulted_non_positive_slider_lengths": defaulted_non_positive_slider_lengths,
             "defaulted_non_positive_slider_svs": defaulted_non_positive_slider_svs,
             "dropped_out_of_order_groups": dropped_out_of_order_groups,
         },
@@ -883,6 +938,9 @@ def start_job(command: dict[str, Any]) -> int:
         raise ValueError("start_job requires a job_id")
     try:
         result_path, provenance = run_inference(command, job_id)
+        defaulted_non_positive_slider_lengths = provenance["output_sanitization"][
+            "defaulted_non_positive_slider_lengths"
+        ]
         defaulted_non_positive_slider_svs = provenance["output_sanitization"][
             "defaulted_non_positive_slider_svs"
         ]
@@ -890,6 +948,12 @@ def start_job(command: dict[str, Any]) -> int:
             "dropped_out_of_order_groups"
         ]
         warnings = []
+        if defaulted_non_positive_slider_lengths:
+            warnings.append(
+                "Defaulted "
+                f"{defaulted_non_positive_slider_lengths} non-positive generated "
+                "slider length calculation(s) to the current velocity baseline."
+            )
         if defaulted_non_positive_slider_svs:
             warnings.append(
                 "Defaulted "
