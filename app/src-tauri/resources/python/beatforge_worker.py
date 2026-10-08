@@ -23,23 +23,28 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "6"
+WORKER_VERSION = "7"
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
-def install_generated_group_time_guard() -> dict[str, int]:
-    """Resolve generated group times and discard explicit time regressions.
+def install_generated_group_guard() -> dict[str, int]:
+    """Normalize unsafe generated group values before postprocessing.
 
     Mapperatorinator permits event groups to share the preceding TIME_SHIFT and
     interpolates untimed slider components. Passing no event_times to get_groups
     leaves those groups at the dataclass's 0 ms default, so resolve them with the
-    upstream timing rules before checking their order.
+    upstream timing rules before checking their order. A non-positive generated
+    slider velocity would otherwise produce a zero-length slider, so treat it as
+    absent and let the upstream geometry fallback calculate a valid length.
     """
     from osuT5.osuT5.dataset import data_utils
     from osuT5.osuT5.inference import postprocessor
 
     original_get_groups = postprocessor.get_groups
-    stats = {"dropped_out_of_order_groups": 0}
+    stats = {
+        "defaulted_non_positive_slider_svs": 0,
+        "dropped_out_of_order_groups": 0,
+    }
 
     def guarded_get_groups(
         events: list[Any], *, event_times=None, types_first: bool = False
@@ -63,6 +68,13 @@ def install_generated_group_time_guard() -> dict[str, int]:
         kept_indices = []
         last_absolute_time: int | None = None
         for group, indices in zip(groups, group_indices):
+            if (
+                group.event_type == data_utils.EventType.SLIDER_HEAD
+                and group.scroll_speed is not None
+                and group.scroll_speed <= 0
+            ):
+                group.scroll_speed = None
+                stats["defaulted_non_positive_slider_svs"] += 1
             if group.event_type in data_utils.TIMED_EVENTS and (
                 last_absolute_time is not None
                 and group.time < last_absolute_time
@@ -638,7 +650,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     ):
         with contextlib.redirect_stdout(sys.stderr):
             inference = importlib.import_module("inference")
-            generated_group_stats = install_generated_group_time_guard()
+            generated_group_stats = install_generated_group_guard()
 
     with loading_step(job_id, "loading_inference_config", 10, "Loading inference configuration"):
         with contextlib.redirect_stdout(sys.stderr):
@@ -777,9 +789,17 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
                 verbose=True,
             )
 
+    defaulted_non_positive_slider_svs = generated_group_stats[
+        "defaulted_non_positive_slider_svs"
+    ]
     dropped_out_of_order_groups = generated_group_stats[
         "dropped_out_of_order_groups"
     ]
+    if defaulted_non_positive_slider_svs:
+        log(
+            "Defaulted non-positive generated slider velocity values: "
+            f"{defaulted_non_positive_slider_svs}"
+        )
     if dropped_out_of_order_groups:
         log(
             "Discarded generated event groups whose absolute time moved backwards: "
@@ -850,6 +870,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             "fast decoder disabled",
         ],
         "output_sanitization": {
+            "defaulted_non_positive_slider_svs": defaulted_non_positive_slider_svs,
             "dropped_out_of_order_groups": dropped_out_of_order_groups,
         },
     }
@@ -862,10 +883,19 @@ def start_job(command: dict[str, Any]) -> int:
         raise ValueError("start_job requires a job_id")
     try:
         result_path, provenance = run_inference(command, job_id)
+        defaulted_non_positive_slider_svs = provenance["output_sanitization"][
+            "defaulted_non_positive_slider_svs"
+        ]
         dropped_out_of_order_groups = provenance["output_sanitization"][
             "dropped_out_of_order_groups"
         ]
         warnings = []
+        if defaulted_non_positive_slider_svs:
+            warnings.append(
+                "Defaulted "
+                f"{defaulted_non_positive_slider_svs} non-positive generated "
+                "slider velocity value(s) to geometry-based length calculation."
+            )
         if dropped_out_of_order_groups:
             warnings.append(
                 "Discarded "
