@@ -38,10 +38,13 @@ const outputPath = ref(savedSettings.outputPath ?? '')
 const tempPath = ref(savedSettings.tempPath ?? '')
 const osuPath = ref(savedSettings.osuPath ?? '')
 const device = ref(savedSettings.device ?? 'cuda')
-const precision = ref(savedSettings.precision === 'fp16' ? 'bf16' : (savedSettings.precision ?? 'bf16'))
+const precision = ref(
+  savedSettings.precision === 'fp16' ? 'bf16' : (savedSettings.precision ?? 'bf16'),
+)
 const workers = ref(savedSettings.workers ?? 2)
 const autoImport = ref(savedSettings.autoImport ?? true)
 const keepIntermediate = ref(savedSettings.keepIntermediate ?? false)
+const repairGeneratedOutput = ref(savedSettings.repairGeneratedOutput ?? true)
 const updates = ref(savedSettings.checkUpdates ?? true)
 const checking = ref(false)
 const saving = ref(false)
@@ -59,6 +62,7 @@ onMounted(async () => {
     workers.value = settings.workers
     autoImport.value = settings.autoImport
     keepIntermediate.value = settings.keepIntermediate
+    repairGeneratedOutput.value = settings.repairGeneratedOutput
     updates.value = settings.checkUpdates
   } catch (reason) {
     message.error(`Could not load desktop settings: ${String(reason)}`)
@@ -97,6 +101,7 @@ async function saveSettings() {
     workers: workers.value,
     autoImport: autoImport.value,
     keepIntermediate: keepIntermediate.value,
+    repairGeneratedOutput: repairGeneratedOutput.value,
     checkUpdates: updates.value,
   }
   saving.value = true
@@ -158,7 +163,9 @@ async function saveSettings() {
               :key="installation.path"
               type="button"
               :disabled="!installation.executable"
-              :title="installation.executable ? 'Use this osu! installation' : 'No osu!.exe detected here'"
+              :title="
+                installation.executable ? 'Use this osu! installation' : 'No osu!.exe detected here'
+              "
               @click="osuPath = installation.path"
             >
               <strong>osu! {{ installation.kind }}</strong
@@ -216,6 +223,20 @@ async function saveSettings() {
             >BF16 is the native precision for Mapperatorinator V32. Unsupported GPUs fall back
             safely to FP32.</NAlert
           >
+          <div class="setting-row">
+            <div>
+              <strong>Repair unsafe generated gameplay data</strong
+              ><small
+                >Resolve generated event times, discard time regressions, and repair invalid slider
+                values. Disable to preserve Mapperatorinator output unchanged.</small
+              >
+            </div>
+            <NSwitch v-model:value="repairGeneratedOutput" />
+          </div>
+          <NAlert v-if="!repairGeneratedOutput" type="warning" :show-icon="false">
+            Raw output can fail validation or contain unplayable objects. Failed output can still be
+            imported manually from the job details.
+          </NAlert>
         </NForm>
       </NCard>
     </section>

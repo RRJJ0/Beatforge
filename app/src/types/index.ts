@@ -265,5 +265,6 @@ export interface AppSettings {
   workers: number
   autoImport: boolean
   keepIntermediate: boolean
+  repairGeneratedOutput: boolean
   checkUpdates: boolean
 }

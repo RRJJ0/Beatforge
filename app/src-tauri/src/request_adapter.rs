@@ -26,6 +26,7 @@ pub struct AdapterContext {
     pub model_version: String,
     pub device: String,
     pub precision: String,
+    pub repair_generated_output: bool,
     pub gpu_name: Option<String>,
     pub gpu_memory_total_mb: Option<u64>,
     pub driver_version: Option<String>,
@@ -65,6 +66,7 @@ pub struct ProductionInferenceConfig {
     pub hitsounded: bool,
     pub device: String,
     pub precision: String,
+    pub repair_generated_output: bool,
 }
 
 fn validate_text(value: &str, label: &str) -> Result<(), String> {
@@ -292,6 +294,7 @@ pub fn build(
             hitsounded: input.hitsounded,
             device: context.device.clone(),
             precision: context.precision.clone(),
+            repair_generated_output: context.repair_generated_output,
         },
     })
 }
@@ -348,6 +351,7 @@ mod tests {
             model_version: "32.test".into(),
             device: "cuda".into(),
             precision: "fp16".into(),
+            repair_generated_output: true,
             gpu_name: Some("Fixture GPU".into()),
             gpu_memory_total_mb: Some(8192),
             driver_version: Some("999.0".into()),
@@ -361,6 +365,7 @@ mod tests {
         let command = build("BF-test_1", &input, &context).unwrap();
         assert_eq!(command.config.gamemode, 0);
         assert_eq!(command.config.seed, 12345);
+        assert!(command.config.repair_generated_output);
         assert_eq!(command.gpu_name.as_deref(), Some("Fixture GPU"));
         assert_eq!(command.gpu_memory_total_mb, Some(8192));
         assert_eq!(command.driver_version.as_deref(), Some("999.0"));
@@ -384,6 +389,21 @@ mod tests {
         let json = serde_json::to_value(command).unwrap();
         assert!(json.get("scenario").is_none());
         assert!(json.get("model").is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn forwards_raw_output_preference_to_the_worker() {
+        let (root, input, mut context) = fixture();
+        context.repair_generated_output = false;
+
+        let command = build("BF-raw-output", &input, &context).unwrap();
+
+        assert!(!command.config.repair_generated_output);
+        assert_eq!(
+            serde_json::to_value(command).unwrap()["config"]["repair_generated_output"],
+            false
+        );
         let _ = fs::remove_dir_all(root);
     }
 

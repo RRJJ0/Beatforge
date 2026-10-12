@@ -1,4 +1,7 @@
-use crate::validation::{ValidationReport, limits::VALIDATED_DIRECTORY};
+use crate::validation::{
+    ValidationReport, ValidationStatus,
+    limits::{RAW_DIRECTORY, VALIDATED_DIRECTORY},
+};
 use serde::Serialize;
 use std::{
     fs,
@@ -58,9 +61,9 @@ fn create_import_handoff(
         return Err("Invalid managed job identity".into());
     }
     let metadata = fs::symlink_metadata(artifact)
-        .map_err(|error| format!("Could not inspect the validated artifact: {error}"))?;
+        .map_err(|error| format!("Could not inspect the import artifact: {error}"))?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err("The validated artifact is not a regular managed file".into());
+        return Err("The import artifact is not a regular managed file".into());
     }
     let extension = artifact
         .extension()
@@ -68,7 +71,7 @@ fn create_import_handoff(
         .unwrap_or_default()
         .to_ascii_lowercase();
     if !matches!(extension.as_str(), "osu" | "osz") {
-        return Err("Only validated .osu and .osz files can be imported".into());
+        return Err("Only managed .osu and .osz files can be imported".into());
     }
 
     let handoff_root = import_handoff_root(cache_root)?;
@@ -176,10 +179,16 @@ pub fn resolve_validated_artifact(
     {
         return Err("The validation report contains an unsafe deliverable path".into());
     }
+    let jobs_root = jobs_root
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the managed jobs directory: {error}"))?;
     let job_root = jobs_root
         .join(job_id)
         .canonicalize()
         .map_err(|error| format!("Could not resolve the managed job directory: {error}"))?;
+    if job_root.parent() != Some(jobs_root.as_path()) {
+        return Err("The job directory escaped the managed jobs directory".into());
+    }
     let validated_root = job_root
         .join(VALIDATED_DIRECTORY)
         .canonicalize()
@@ -215,6 +224,71 @@ pub fn resolve_validated_artifact(
         return Err("Only validated .osu and .osz files can be delivered".into());
     }
     Ok(expected)
+}
+
+pub fn resolve_failed_artifact(
+    jobs_root: &Path,
+    job_id: &str,
+    status: &str,
+    report: Option<&ValidationReport>,
+) -> Result<PathBuf, String> {
+    if !valid_job_id(job_id) {
+        return Err("Invalid managed job identity".into());
+    }
+    if status != "validation_failed" {
+        return Err("Only a validation-failed job can use Import anyway".into());
+    }
+    let report = report.ok_or_else(|| "The job has no validation report".to_string())?;
+    if report.status != ValidationStatus::Invalid || report.job_id != job_id {
+        return Err("The job validation report does not identify a failed artifact".into());
+    }
+    let components = Path::new(&report.source_path)
+        .components()
+        .collect::<Vec<_>>();
+    if components.len() != 2
+        || components[0] != Component::Normal(RAW_DIRECTORY.as_ref())
+        || !matches!(components[1], Component::Normal(_))
+    {
+        return Err("The validation report contains an unsafe raw artifact path".into());
+    }
+    let jobs_root = jobs_root
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the managed jobs directory: {error}"))?;
+    let job_root = jobs_root
+        .join(job_id)
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the managed job directory: {error}"))?;
+    if job_root.parent() != Some(jobs_root.as_path()) {
+        return Err("The job directory escaped the managed jobs directory".into());
+    }
+    let raw_root = job_root
+        .join(RAW_DIRECTORY)
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the managed raw directory: {error}"))?;
+    if raw_root.parent() != Some(job_root.as_path()) {
+        return Err("The raw directory escaped the managed job directory".into());
+    }
+    let artifact = job_root.join(&report.source_path);
+    let metadata = fs::symlink_metadata(&artifact)
+        .map_err(|error| format!("Could not inspect the raw artifact: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("The raw artifact is not a regular managed file".into());
+    }
+    let artifact = artifact
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the raw artifact: {error}"))?;
+    if artifact.parent() != Some(raw_root.as_path()) {
+        return Err("The raw artifact escaped its managed directory".into());
+    }
+    let extension = artifact
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(extension.as_str(), "osu" | "osz") {
+        return Err("Only managed .osu and .osz files can be imported".into());
+    }
+    Ok(artifact)
 }
 
 fn executable_from_path(path: &Path) -> Option<PathBuf> {
@@ -335,10 +409,7 @@ pub fn import_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validation::{
-        ValidationStatus,
-        types::{VALIDATION_SCHEMA_VERSION, VALIDATOR_VERSION},
-    };
+    use crate::validation::types::{VALIDATION_SCHEMA_VERSION, VALIDATOR_VERSION};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temporary_root(name: &str) -> PathBuf {
@@ -359,6 +430,22 @@ mod tests {
             status: ValidationStatus::Valid,
             source_path: "raw/result.osz".into(),
             validated_path: Some(relative.into()),
+            issues: Vec::new(),
+            statistics: None,
+            repairs: Vec::new(),
+            started_at: "2026-10-07T00:00:00Z".into(),
+            completed_at: "2026-10-07T00:00:01Z".into(),
+        }
+    }
+
+    fn invalid_report(job_id: &str, source: &str) -> ValidationReport {
+        ValidationReport {
+            schema_version: VALIDATION_SCHEMA_VERSION,
+            validator_version: VALIDATOR_VERSION.into(),
+            job_id: job_id.into(),
+            status: ValidationStatus::Invalid,
+            source_path: source.into(),
+            validated_path: None,
             issues: Vec::new(),
             statistics: None,
             repairs: Vec::new(),
@@ -426,6 +513,73 @@ mod tests {
             )
             .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolves_only_the_reported_raw_artifact_for_a_validation_failure() {
+        let root = temporary_root("failed");
+        let job = root.join("BF-TEST");
+        fs::create_dir_all(job.join(RAW_DIRECTORY)).unwrap();
+        let artifact = job.join(RAW_DIRECTORY).join("result.osz");
+        fs::write(&artifact, b"invalid but importable archive").unwrap();
+
+        let resolved = resolve_failed_artifact(
+            &root,
+            "BF-TEST",
+            "validation_failed",
+            Some(&invalid_report("BF-TEST", "raw/result.osz")),
+        )
+        .unwrap();
+        assert_eq!(resolved, artifact.canonicalize().unwrap());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_import_rejects_other_statuses_identities_and_paths() {
+        let root = temporary_root("failed-reject");
+        let job = root.join("BF-TEST");
+        fs::create_dir_all(job.join(RAW_DIRECTORY)).unwrap();
+        fs::write(job.join(RAW_DIRECTORY).join("result.osz"), b"fixture").unwrap();
+
+        assert!(
+            resolve_failed_artifact(
+                &root,
+                "BF-TEST",
+                "completed",
+                Some(&invalid_report("BF-TEST", "raw/result.osz")),
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_failed_artifact(
+                &root,
+                "BF-TEST",
+                "validation_failed",
+                Some(&invalid_report("BF-OTHER", "raw/result.osz")),
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_failed_artifact(
+                &root,
+                "BF-TEST",
+                "validation_failed",
+                Some(&invalid_report("BF-TEST", "../result.osz")),
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_failed_artifact(
+                &root,
+                "BF-TEST",
+                "validation_failed",
+                Some(&report("BF-TEST", "validated/result.osz")),
+            )
+            .is_err()
+        );
+
         fs::remove_dir_all(root).unwrap();
     }
 

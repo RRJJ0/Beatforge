@@ -163,6 +163,10 @@ export async function importDesktopJobOutput(jobId: string) {
   return invoke<OsuImportLaunch>('import_job_output', { jobId })
 }
 
+export async function importFailedDesktopJobOutput(jobId: string) {
+  return invoke<OsuImportLaunch>('import_failed_job_output', { jobId })
+}
+
 export function onDesktopJobEvent(handler: (job: GenerationJob) => void): Promise<UnlistenFn> {
   return listen<GenerationJob>('job-event', (event) => handler(event.payload))
 }

@@ -51,8 +51,9 @@ Run this checklist on a Windows machine with Beatforge, osu! stable and/or osu!l
 - [ ] Configure a folder that does not contain `osu!.exe`. Manual import should show an understandable error and must not start another executable.
 - [ ] Clear the configured path. If no executable is detected but Windows has an `.osz` association, confirm manual import uses that association. Automatic import must not use this fallback.
 - [ ] Rename or move a disposable validated output, then click either action. Beatforge should report that the artifact cannot be resolved and should not launch osu! or Explorer with another path.
-- [ ] Confirm jobs without a validated output do not display the folder/import actions.
-- [ ] Confirm the selected/opened file is always under `jobs/<job-id>/validated/`, never `raw/`, `working/`, or an arbitrary external directory.
+- [ ] Confirm jobs without a validated output do not display the normal folder/import actions. A `validation_failed` job with an invalid report may display only **Import failed output anyway**.
+- [ ] Click **Import failed output anyway**, cancel the warning, and confirm nothing launches. Repeat and accept the warning; confirm osu! receives a disposable handoff while the original report-selected `raw` artifact remains unchanged.
+- [ ] Confirm the normal actions select/open only `jobs/<job-id>/validated/`. Confirm the failed-output exception resolves only the same job's report-selected `raw/<filename>`, never `working/` or an arbitrary external path.
 
 ## Acceptance result
 

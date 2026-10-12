@@ -92,7 +92,13 @@ struct AppSettings {
     workers: u8,
     auto_import: bool,
     keep_intermediate: bool,
+    #[serde(default = "default_true")]
+    repair_generated_output: bool,
     check_updates: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl AppSettings {
@@ -106,8 +112,24 @@ impl AppSettings {
             workers: 2,
             auto_import: true,
             keep_intermediate: false,
+            repair_generated_output: true,
             check_updates: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::AppSettings;
+
+    #[test]
+    fn legacy_settings_enable_generated_output_repair() {
+        let settings: AppSettings = serde_json::from_str(
+            r#"{"outputPath":"out","tempPath":"temp","osuPath":"","device":"cuda","precision":"bf16","workers":2,"autoImport":true,"keepIntermediate":false,"checkUpdates":true}"#,
+        )
+        .unwrap();
+
+        assert!(settings.repair_generated_output);
     }
 }
 
@@ -301,6 +323,29 @@ fn import_job_output(
     )
 }
 
+#[tauri::command]
+fn import_failed_job_output(
+    app: AppHandle,
+    job_id: String,
+) -> Result<osu_integration::ImportLaunch, String> {
+    let (connection, paths) = open_database(&app)?;
+    let job = jobs::get(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    let artifact = osu_integration::resolve_failed_artifact(
+        Path::new(&paths.jobs),
+        &job_id,
+        &job.status,
+        job.validation_report.as_ref(),
+    )?;
+    let executable = selected_osu_executable(&app)?;
+    osu_integration::import_artifact(
+        &artifact,
+        Path::new(&paths.cache),
+        &job_id,
+        executable.as_deref(),
+        true,
+    )
+}
+
 pub(crate) fn try_auto_import(app: &AppHandle, job_id: &str) -> Result<(), String> {
     let settings = load_settings_value(app)?;
     if !settings.auto_import {
@@ -408,6 +453,7 @@ fn build_production_request(
         model_version: model.target_version,
         device: settings.device,
         precision: settings.precision,
+        repair_generated_output: settings.repair_generated_output,
         gpu_name: gpu.available.then_some(gpu.name),
         gpu_memory_total_mb: gpu.memory_total_mb,
         driver_version: gpu.driver_version,
@@ -1214,7 +1260,8 @@ pub fn run() {
             retry_job,
             delete_job,
             reveal_job_output,
-            import_job_output
+            import_job_output,
+            import_failed_job_output
         ])
         .build(tauri::generate_context!())
         .expect("error while building Beatforge");

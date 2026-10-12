@@ -11,7 +11,11 @@ import {
 import { useJobsStore } from '@/stores/jobs'
 import { useDesktopStore } from '@/stores/desktop'
 import type { BeatmapStatistics } from '@/types'
-import { importDesktopJobOutput, revealDesktopJobOutput } from '@/services/desktop'
+import {
+  importDesktopJobOutput,
+  importFailedDesktopJobOutput,
+  revealDesktopJobOutput,
+} from '@/services/desktop'
 
 const jobsStore = useJobsStore()
 const desktopStore = useDesktopStore()
@@ -53,6 +57,18 @@ function durationSummary(milliseconds?: number | null) {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = String(totalSeconds % 60).padStart(2, '0')
   return `${minutes}:${seconds}`
+}
+
+async function importFailedOutput(jobId: string, errorCount: number) {
+  const confirmed = window.confirm(
+    `This beatmap failed validation with ${errorCount} error${errorCount === 1 ? '' : 's'}. ` +
+      'It may be unplayable, incomplete, or rejected by osu!. Import the raw generated file anyway?',
+  )
+  if (!confirmed) return
+  await runAction(
+    () => importFailedDesktopJobOutput(jobId).then(() => undefined),
+    'Raw output sent to osu!',
+  )
 }
 </script>
 
@@ -168,6 +184,22 @@ function durationSummary(milliseconds?: number | null) {
             title="Import into osu!"
             aria-label="Import into osu!"
             @click="runAction(() => importDesktopJobOutput(job.id).then(() => undefined), 'Import opened')"
+            ><template #icon><NIcon :component="OpenOutline" /></template
+          ></NButton>
+          <NButton
+            v-if="job.status === 'validation_failed' && job.validationReport"
+            secondary
+            circle
+            size="small"
+            type="warning"
+            title="Import failed output anyway"
+            aria-label="Import failed output anyway"
+            @click="
+              importFailedOutput(
+                job.id,
+                job.validationReport.issues.filter((issue) => issue.severity === 'error').length,
+              )
+            "
             ><template #icon><NIcon :component="OpenOutline" /></template
           ></NButton>
           <NButton

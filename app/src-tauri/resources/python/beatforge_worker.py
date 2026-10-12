@@ -24,7 +24,7 @@ from typing import Any
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "8"
+WORKER_VERSION = "9"
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
@@ -656,6 +656,8 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         raise ValueError("Unsupported inference device")
     if config.get("precision") not in {"fp16", "bf16", "fp32"}:
         raise ValueError("Unsupported inference precision")
+    if not isinstance(config.get("repair_generated_output"), bool):
+        raise ValueError("repair_generated_output must be boolean")
 
     progress(job_id, "adapter_ready", 3, "Validated the managed production request")
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -696,7 +698,15 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     ):
         with contextlib.redirect_stdout(sys.stderr):
             inference = importlib.import_module("inference")
-            generated_group_stats = install_generated_group_guard()
+            generated_group_stats = (
+                install_generated_group_guard()
+                if config["repair_generated_output"]
+                else {
+                    "defaulted_non_positive_slider_lengths": 0,
+                    "defaulted_non_positive_slider_svs": 0,
+                    "dropped_out_of_order_groups": 0,
+                }
+            )
 
     with loading_step(job_id, "loading_inference_config", 10, "Loading inference configuration"):
         with contextlib.redirect_stdout(sys.stderr):
@@ -781,6 +791,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         "hitsounded": args.hitsounded,
         "device": args.device,
         "precision": args.precision,
+        "repair_generated_output": config["repair_generated_output"],
         "generate_positions": args.generate_positions,
         "export_osz": args.export_osz,
         "fast_decoder_loop": args.fast_decoder_loop,
@@ -924,6 +935,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             "fast decoder disabled",
         ],
         "output_sanitization": {
+            "enabled": config["repair_generated_output"],
             "defaulted_non_positive_slider_lengths": defaulted_non_positive_slider_lengths,
             "defaulted_non_positive_slider_svs": defaulted_non_positive_slider_svs,
             "dropped_out_of_order_groups": dropped_out_of_order_groups,

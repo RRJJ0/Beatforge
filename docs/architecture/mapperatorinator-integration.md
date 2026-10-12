@@ -31,7 +31,7 @@ The adapter must redirect upstream `print` and logging output to stderr or the l
 
 ## Production worker bootstrap
 
-The version 8 bootstrap is embedded in the Rust binary and atomically materialized under `runtime/worker/8` before launch. Rust starts it with the managed Python interpreter in isolated mode and sends exactly one newline-terminated command. Both directions enforce the 64 KiB phase 3 message limit. The bootstrap captures stdout while importing PyTorch, FFmpeg and Mapperatorinator so upstream prints cannot become protocol frames; diagnostic output and tracebacks remain on stderr and are capped before being appended to the managed worker log.
+The version 9 bootstrap is embedded in the Rust binary and atomically materialized under `runtime/worker/9` before launch. Rust starts it with the managed Python interpreter in isolated mode and sends exactly one newline-terminated command. Both directions enforce the 64 KiB phase 3 message limit. The bootstrap captures stdout while importing PyTorch, FFmpeg and Mapperatorinator so upstream prints cannot become protocol frames; diagnostic output and tracebacks remain on stderr and are capped before being appended to the managed worker log.
 
 The `health_check` command imports the pinned source without loading model weights, validates the locked callable surface, resolves the managed FFmpeg executable, reports CUDA visibility, and checks the expected V32 model files. Its single `health` response carries protocol and worker versions plus component identity and structured errors. A non-ready health response is valid protocol data rather than a malformed-worker failure.
 
@@ -42,6 +42,8 @@ The phase 3 mock executable remains the default generation backend until phase 5
 The Vue domain request selects only the managed package id `mapperatorinator-v32-standard`; it has no checkpoint or output-path field. Rust accepts gamemode 0, difficulty 1.0–8.0, seed 0–65535, bounded positive and negative descriptor lists, optional `.osu` reference context, AR/CS 0–10, and a hitsound switch. Audio extensions follow the pinned inference entry point: MP3, WAV, OGG, M4A, and FLAC.
 
 Before a command is eligible for the production worker, Rust canonicalizes the input files and resolves the source, model, and per-job output from application-managed roots. It rejects traversal outside those roots and checks the source marker plus all four fixed model files. Device and precision come from validated application settings. The serialized command contains only this resolved identity and a whitelist `config` object; mock scenarios and the frontend-facing model selector never cross the production boundary.
+
+The settings schema also supplies `repair_generated_output`, defaulting to `true` when older saved settings omit it. When enabled, the worker installs the generated-event timing and slider guards before inference post-processing. When disabled, those guards are not installed and Mapperatorinator's output is preserved for the validation pipeline without gameplay-content mutation. The effective value and sanitization counters are included in provenance.
 
 The Python bootstrap repeats structural and range validation before importing inference code. A valid production command runs the pinned `compile_args`, `setup_inference_environment`, `load_model_with_server`, `get_config`, and `generate` API surface without changing the domain contract.
 

@@ -122,9 +122,11 @@ Archive reports sum object and beatmap counts, combine the BPM range, and use th
 
 ## Operating-system delivery boundary
 
-Phase 6.8 never accepts an artifact path from the UI. A job-id command reloads the SQLite record and requires `completed`, a completable report with matching job identity, one `validated/<filename>` relative path, a matching stored output path, a regular non-symlink file, and canonical containment directly beneath the managed validated directory. Only `.osu` and `.osz` may cross this boundary.
+Phase 6.8 never accepts an artifact path from the UI. The normal job-id command reloads the SQLite record and requires `completed`, a completable report with matching job identity, one `validated/<filename>` relative path, a matching stored output path, a regular non-symlink file, and canonical containment directly beneath the managed validated directory. Only `.osu` and `.osz` may cross this boundary.
 
-The operating-system launch boundary receives a unique copy under the managed `cache/osu-import` directory rather than the canonical validated artifact. This preserves repeatable delivery when an osu! importer consumes its input. Failed launches remove their handoff immediately; unconsumed handoffs older than 24 hours are removed during a later application startup.
+An explicit **Import failed output anyway** command is the sole exception to validated delivery. It requires `validation_failed`, an `invalid` report with matching job identity, and the report's exact `raw/<filename>` source. The backend resolves a regular non-symlink `.osu` or `.osz` directly beneath that job's canonical raw directory. The UI presents a warning confirmation, the job remains failed, and the raw artifact is never exposed as a validated output. Failed output is never imported automatically.
+
+The operating-system launch boundary receives a unique copy under the managed `cache/osu-import` directory rather than the canonical validated or raw artifact. This preserves repeatable delivery when an osu! importer consumes its input. Failed launches remove their handoff immediately; unconsumed handoffs older than 24 hours are removed during a later application startup.
 
 Windows folder reveal uses Explorer only after the boundary check. Import prefers an explicitly configured `osu!.exe`, then a detected stable/lazer executable. Manual import may use the Windows file association when no executable is available; automatic import is stricter and never uses that fallback. An automatic launch failure is logged but cannot retroactively invalidate a correctly validated beatmap. Physical Editor acceptance remains a human gate documented in `docs/testing/stage-6-physical-acceptance.md`.
 
