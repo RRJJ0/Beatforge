@@ -654,7 +654,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 規劃子項目：
 
-- [ ] 7.1：建立正式歷史資料檢視、搜尋、篩選與排序。
+- [x] 7.1：建立正式歷史資料檢視、搜尋、篩選與排序。
 - [ ] 7.2：完成歷史任務刪除、重新生成與檔案一致性處理。
 - [ ] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
 - [ ] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
@@ -665,12 +665,13 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.1 歷史檢視、搜尋與篩選
 
-- 將 History 畫面改為讀取 SQLite 的正式 job records，不使用展示資料。
-- 支援關鍵字、狀態、模型與日期篩選，以及建立時間排序。
-- 明確呈現完成、驗證失敗、推論失敗、取消與中斷狀態。
-- 處理大量歷史紀錄，避免一次渲染造成介面卡頓。
+- History 畫面在桌面環境直接使用 SQLite 載入的正式 job records，不再顯示獨立的假歷史資料；重新啟動或手動 refresh 都會還原目前資料庫內容。
+- 支援 title、artist、job ID、model 與 audio path 關鍵字搜尋，可與狀態、模型及 today／7 days／30 days 日期條件組合。
+- 支援 newest、oldest 與 title 排序，並明確呈現完成、驗證失敗、推論失敗、取消、中斷及執行中狀態。
+- 結果採每頁 25 筆分頁，篩選變更會回到第一頁；完成且具有 validated artifact 的紀錄可直接開啟檔案位置或匯入 osu!。
+- 畫面統計改由目前正式紀錄計算 stored、completed、average target 與 stopped／invalid 數量，並提供 loading、資料庫錯誤及空結果狀態。
 
-驗收：重新啟動後仍可查到既有任務；組合篩選與空結果狀態正確，畫面內容與 SQLite 一致。
+驗收：TypeScript type-check、production build 與 History filter/sort 單元測試通過；重新啟動後仍可查到既有任務，組合篩選與空結果狀態正確，畫面內容與 SQLite 一致。
 
 #### 7.2 歷史動作與檔案一致性
 

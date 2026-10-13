@@ -33,11 +33,13 @@ export const useJobsStore = defineStore('jobs', () => {
   const saved = desktop ? null : localStorage.getItem('beatforge:jobs')
   const jobs = ref<GenerationJob[]>(saved ? JSON.parse(saved) : desktop ? [] : seedJobs)
   const initialized = ref(false)
+  const loading = ref(false)
   const error = ref('')
   const mockTasks = new Map<string, MockTask>()
 
   const activeCount = computed(
-    () => jobs.value.filter((job) => ['running', 'queued', 'validating'].includes(job.status)).length,
+    () =>
+      jobs.value.filter((job) => ['running', 'queued', 'validating'].includes(job.status)).length,
   )
   const completedJobs = computed(() => jobs.value.filter((job) => job.status === 'completed'))
   const completedToday = computed(() => completedJobs.value.length)
@@ -54,9 +56,23 @@ export const useJobsStore = defineStore('jobs', () => {
     if (!desktop) return
     try {
       await onDesktopJobEvent(upsert)
+      await refreshJobs()
+    } catch (reason) {
+      error.value = reason instanceof Error ? reason.message : String(reason)
+    }
+  }
+
+  async function refreshJobs() {
+    if (!desktop) return
+    loading.value = true
+    error.value = ''
+    try {
       jobs.value = await listDesktopJobs()
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason)
+      throw reason
+    } finally {
+      loading.value = false
     }
   }
 
@@ -161,8 +177,10 @@ export const useJobsStore = defineStore('jobs', () => {
     completedJobs,
     completedToday,
     initialized,
+    loading,
     error,
     initialize,
+    refreshJobs,
     addJob,
     createJob,
     cancelJob,
