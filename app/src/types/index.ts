@@ -267,6 +267,7 @@ export interface AppSettings {
   keepIntermediate: boolean
   repairGeneratedOutput: boolean
   checkUpdates: boolean
+  desktopNotifications: boolean
 }
 
 export interface SettingsImportItem {

@@ -658,7 +658,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 - [x] 7.2：完成歷史任務刪除、重新生成與檔案一致性處理。
 - [x] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
 - [x] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
-- [ ] 7.5：加入桌面通知與背景任務完成／失敗提示。
+- [x] 7.5：加入桌面通知與背景任務完成／失敗提示。
 - [ ] 7.6：加入輕量音訊、時間軸與物件密度預覽。
 - [ ] 7.7：完成繁體中文／英文介面與 accessibility 改善。
 - [ ] 7.8：執行產品整合、migration 與日常流程驗收。
@@ -685,7 +685,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.3 設定預設值、匯入／匯出與 migration
 
-- Settings database value 與匯出檔使用 schema v1 文件，包含 `schemaVersion` 與完整 `settings` payload；既有無版本 JSON 會在首次讀取時遷移並重新保存，舊 `fp16` 值同步正規化為 V32 使用的 `bf16`。
+- Settings database value 與匯出檔目前使用 schema v2 文件，包含 `schemaVersion` 與完整 `settings` payload；既有無版本／v1 JSON 會在首次讀取時遷移並重新保存，舊 `fp16` 值同步正規化為 V32 使用的 `bf16`，v1 則補入背景通知預設值。
 - 保存與匯入會驗證 device、precision、worker count、必要路徑字串及未知欄位；較新 schema、損壞 JSON、非 UTF-8、超過 256 KiB 或非 `.json` regular file 會在修改設定前拒絕。
 - Settings UI 提供 JSON 匯出與兩階段匯入。Preview 逐欄顯示 current、result、`apply`／`ignored`／`reset`／`unchanged` 與原因，確認後才保存。
 - output、temporary 與 osu! path 視為機器限定欄位；匯入路徑不存在或不適用時保留目前值並標記 ignored，缺少欄位則使用目前 schema／機器預設值。
@@ -707,12 +707,14 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.5 桌面通知與背景狀態
 
-- 在任務完成、驗證失敗或推論失敗時提供可設定的 Windows 桌面通知。
-- 應用程式在前景時避免重複干擾；背景通知可帶回對應任務畫面。
-- 通知只顯示必要摘要，不包含 traceback、完整本機路徑或其他敏感資料。
-- 通知權限不可用時降級為應用程式內提示，不影響任務結果。
+- 使用官方 Tauri notification plugin 監聽既有 `job-event`，針對 completed、validation_failed 與 failed transition 建立通知；cancelled／interrupted 不會打擾使用者。
+- 前景時只顯示可關閉的應用內 job notice，不再重複發送 Windows toast；背景或視窗失焦時，只有在 Settings 的 Background job notifications 開啟且系統權限 granted 時才發送桌面通知。
+- Settings schema 升級至 v2 並保存通知偏好；介面會顯示目前 Windows permission，權限不可用或被拒絕時維持應用內 notice，不改變 job 結果。
+- 通知摘要只使用 artist、title、difficulty 與結果類型，不帶 audio/output path、stage、error message 或 traceback。每個 job 的同一 terminal transition 只提示一次，retry 回到 active state 後才重新允許下一次 terminal notice。
+- 點擊應用內 notice 或仍在 Windows toast 畫面上的通知會導向 `/jobs?job=<id>`，對應 job 會自動捲入視野並標示；初始 SQLite refresh 不經 event handler，因此重新啟動不重播舊通知。
+- 單元測試涵蓋通知內容隱私、terminal deduplication、retry re-arm，以及 cancelled／interrupted 排除。
 
-驗收：各終止狀態至多通知一次；關閉通知後不再顯示系統通知，重新啟動不重播舊通知。
+驗收：各終止狀態至多通知一次；關閉通知後不再顯示系統通知，重新啟動不重播舊通知。Rust settings migration、前端通知單元測試、type-check、lint 與 production build 通過；Windows toast 需以安裝版進行最後實機驗收。
 
 #### 7.6 輕量結果預覽
 

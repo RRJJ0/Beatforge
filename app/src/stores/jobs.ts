@@ -37,6 +37,9 @@ export const useJobsStore = defineStore('jobs', () => {
   const loading = ref(false)
   const error = ref('')
   const mockTasks = new Map<string, MockTask>()
+  const jobEventHandlers = new Set<
+    (job: GenerationJob, previousStatus: GenerationJob['status'] | undefined) => void
+  >()
 
   const activeCount = computed(
     () =>
@@ -51,12 +54,25 @@ export const useJobsStore = defineStore('jobs', () => {
     else jobs.value[index] = job
   }
 
+  function receiveDesktopJobEvent(job: GenerationJob) {
+    const previousStatus = jobs.value.find((item) => item.id === job.id)?.status
+    upsert(job)
+    for (const handler of jobEventHandlers) handler(job, previousStatus)
+  }
+
+  function subscribeJobEvents(
+    handler: (job: GenerationJob, previousStatus: GenerationJob['status'] | undefined) => void,
+  ) {
+    jobEventHandlers.add(handler)
+    return () => jobEventHandlers.delete(handler)
+  }
+
   async function initialize() {
     if (initialized.value) return
     initialized.value = true
     if (!desktop) return
     try {
-      await onDesktopJobEvent(upsert)
+      await onDesktopJobEvent(receiveDesktopJobEvent)
       await refreshJobs()
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason)
@@ -197,5 +213,6 @@ export const useJobsStore = defineStore('jobs', () => {
     retryJob,
     regenerateJob,
     removeJob,
+    subscribeJobEvents,
   }
 })

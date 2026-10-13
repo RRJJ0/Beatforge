@@ -82,7 +82,7 @@ struct OsuInstallation {
     executable: Option<String>,
 }
 
-const SETTINGS_SCHEMA_VERSION: u16 = 1;
+const SETTINGS_SCHEMA_VERSION: u16 = 2;
 const MAX_SETTINGS_IMPORT_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -99,6 +99,8 @@ pub(crate) struct AppSettings {
     #[serde(default = "default_true")]
     repair_generated_output: bool,
     check_updates: bool,
+    #[serde(default = "default_true")]
+    desktop_notifications: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -121,6 +123,7 @@ struct PartialAppSettings {
     keep_intermediate: Option<bool>,
     repair_generated_output: Option<bool>,
     check_updates: Option<bool>,
+    desktop_notifications: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,6 +163,7 @@ impl AppSettings {
             keep_intermediate: false,
             repair_generated_output: true,
             check_updates: true,
+            desktop_notifications: true,
         }
     }
 }
@@ -223,15 +227,17 @@ fn parse_stored_settings(json: &str) -> Result<(AppSettings, bool), String> {
     if value.get("schemaVersion").is_some() {
         let document: SettingsDocument = serde_json::from_value(value)
             .map_err(|error| format!("Stored settings document is invalid: {error}"))?;
-        if document.schema_version != SETTINGS_SCHEMA_VERSION {
+        if document.schema_version == 0 || document.schema_version > SETTINGS_SCHEMA_VERSION {
             return Err(format!(
-                "Unsupported settings schema version {}; expected {SETTINGS_SCHEMA_VERSION}",
+                "Unsupported settings schema version {}; newest supported version is {SETTINGS_SCHEMA_VERSION}",
                 document.schema_version
             ));
         }
+        let migrated = document.schema_version < SETTINGS_SCHEMA_VERSION
+            || document.settings.precision == "fp16";
         let settings = migrate_legacy_settings(document.settings);
         validate_settings(&settings)?;
-        Ok((settings, false))
+        Ok((settings, migrated))
     } else {
         let settings: AppSettings = serde_json::from_value(value)
             .map_err(|error| format!("Legacy settings are invalid: {error}"))?;
@@ -270,9 +276,9 @@ fn preview_settings_json(
         let version = version
             .as_u64()
             .ok_or_else(|| "Settings schemaVersion must be an integer".to_string())?;
-        if version > u16::MAX as u64 || version as u16 != SETTINGS_SCHEMA_VERSION {
+        if version == 0 || version > SETTINGS_SCHEMA_VERSION as u64 {
             return Err(format!(
-                "Unsupported settings schema version {version}; expected {SETTINGS_SCHEMA_VERSION}"
+                "Unsupported settings schema version {version}; newest supported version is {SETTINGS_SCHEMA_VERSION}"
             ));
         }
         let object = value
@@ -388,6 +394,11 @@ fn preview_settings_json(
         partial.repair_generated_output
     );
     portable_setting!("checkUpdates", check_updates, partial.check_updates);
+    portable_setting!(
+        "desktopNotifications",
+        desktop_notifications,
+        partial.desktop_notifications
+    );
     result = migrate_legacy_settings(result);
     validate_settings(&result)
         .map_err(|error| format!("Imported settings would be invalid: {error}"))?;
@@ -419,6 +430,7 @@ mod settings_tests {
             keep_intermediate: false,
             repair_generated_output: true,
             check_updates: true,
+            desktop_notifications: true,
         }
     }
 
@@ -431,6 +443,7 @@ mod settings_tests {
 
         assert!(migrated);
         assert!(settings.repair_generated_output);
+        assert!(settings.desktop_notifications);
         assert_eq!(settings.precision, "bf16");
         let exported = settings_json(&settings).unwrap();
         assert!(exported.contains(&format!(r#""schemaVersion": {SETTINGS_SCHEMA_VERSION}"#)));
@@ -455,6 +468,7 @@ mod settings_tests {
         assert_eq!(preview.resulting_settings.output_path, current.output_path);
         assert_eq!(preview.resulting_settings.device, "cpu");
         assert!(preview.resulting_settings.repair_generated_output);
+        assert!(preview.resulting_settings.desktop_notifications);
         assert!(
             preview
                 .items
@@ -466,6 +480,22 @@ mod settings_tests {
                 .items
                 .iter()
                 .any(|item| { item.field == "repairGeneratedOutput" && item.action == "reset" })
+        );
+    }
+
+    #[test]
+    fn version_one_settings_migrate_notification_preference() {
+        let (settings, migrated) = parse_stored_settings(
+            r#"{"schemaVersion":1,"settings":{"outputPath":"out","tempPath":"temp","osuPath":"","device":"cuda","precision":"bf16","workers":2,"autoImport":true,"keepIntermediate":false,"repairGeneratedOutput":true,"checkUpdates":true}}"#,
+        )
+        .unwrap();
+
+        assert!(migrated);
+        assert!(settings.desktop_notifications);
+        assert!(
+            settings_json(&settings)
+                .unwrap()
+                .contains(&format!(r#""schemaVersion": {SETTINGS_SCHEMA_VERSION}"#))
         );
     }
 
@@ -846,6 +876,9 @@ fn reset_settings(app: AppHandle, field: Option<String>) -> Result<AppSettings, 
             settings.repair_generated_output = defaults.repair_generated_output
         }
         Some("checkUpdates") => settings.check_updates = defaults.check_updates,
+        Some("desktopNotifications") => {
+            settings.desktop_notifications = defaults.desktop_notifications
+        }
         Some(_) => return Err("Unknown settings field".into()),
     }
     persist_settings(&connection, &settings)?;
@@ -1728,6 +1761,7 @@ fn delete_job(app: AppHandle, job_id: String) -> Result<(), String> {
 pub fn run() {
     let application = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             mapperatorinator_lock::validate_builtin().map_err(std::io::Error::other)?;
             let (connection, paths) = open_database(app.handle()).map_err(std::io::Error::other)?;

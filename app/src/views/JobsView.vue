@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { NButton, NCard, NEmpty, NIcon, NProgress, NTag, useMessage } from 'naive-ui'
 import {
   CloseOutline,
@@ -20,6 +22,7 @@ import {
 const jobsStore = useJobsStore()
 const desktopStore = useDesktopStore()
 const message = useMessage()
+const route = useRoute()
 const statusType = {
   running: 'info',
   validating: 'info',
@@ -30,6 +33,16 @@ const statusType = {
   cancelled: 'default',
   interrupted: 'warning',
 } as const
+
+watch(
+  [() => route.query.job, () => jobsStore.jobs.length],
+  async ([jobId]) => {
+    if (typeof jobId !== 'string' || !jobId) return
+    await nextTick()
+    document.getElementById(`job-${jobId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  },
+  { immediate: true },
+)
 
 async function runAction(action: () => Promise<void>, success?: string) {
   try {
@@ -109,7 +122,13 @@ async function removeJob(job: GenerationJob) {
       <NTag size="small" round type="info">Protocol v1</NTag>
     </div>
     <div v-if="jobsStore.jobs.length" class="job-list">
-      <article v-for="job in jobsStore.jobs" :key="job.id" class="job-row">
+      <article
+        v-for="job in jobsStore.jobs"
+        :id="`job-${job.id}`"
+        :key="job.id"
+        class="job-row"
+        :class="{ 'is-notification-target': route.query.job === job.id }"
+      >
         <div class="job-art"><NIcon :component="PlayOutline" /></div>
         <div class="job-content">
           <div class="job-title-row">
@@ -265,6 +284,13 @@ async function removeJob(job: GenerationJob) {
 .job-row:first-child {
   border-top: 0;
   padding-top: 2px;
+}
+.job-row.is-notification-target {
+  margin-inline: -10px;
+  padding-inline: 10px;
+  border-radius: 10px;
+  background: rgba(255, 102, 170, 0.08);
+  box-shadow: inset 3px 0 #ff66aa;
 }
 .job-art {
   width: 48px;

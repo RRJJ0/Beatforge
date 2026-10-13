@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -18,6 +18,7 @@ import {
 } from 'naive-ui'
 import {
   AlbumsOutline,
+  CloseOutline,
   HardwareChipOutline,
   MoonOutline,
   OptionsOutline,
@@ -29,15 +30,64 @@ import {
 import { useAppStore } from '@/stores/app'
 import { useDesktopStore } from '@/stores/desktop'
 import { useJobsStore } from '@/stores/jobs'
+import { loadDesktopSettings } from '@/services/desktop'
+import { onDesktopNotificationAction, sendJobSystemNotification } from '@/services/notifications'
+import {
+  TerminalJobTracker,
+  shouldSendSystemNotification,
+  type JobNotice,
+} from '@/utils/jobNotifications'
+import type { GenerationJob, JobStatus } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const desktopStore = useDesktopStore()
 const jobsStore = useJobsStore()
-onMounted(() => {
-  desktopStore.initialize()
-  jobsStore.initialize()
+const jobNotice = ref<JobNotice | null>(null)
+const notificationTracker = new TerminalJobTracker()
+let unsubscribeJobEvents: (() => void) | undefined
+let unsubscribeNotificationActions: (() => void) | undefined
+
+async function openNotifiedJob(jobId: string) {
+  jobNotice.value = null
+  await router.push({ name: 'jobs', query: { job: jobId } })
+}
+
+async function handleJobEvent(job: GenerationJob, previousStatus?: JobStatus) {
+  const notice = notificationTracker.consume(previousStatus, job)
+  if (!notice) return
+  jobNotice.value = notice
+  if (!shouldSendSystemNotification(true, document.visibilityState, document.hasFocus())) return
+  try {
+    const settings = await loadDesktopSettings()
+    if (
+      shouldSendSystemNotification(
+        settings.desktopNotifications,
+        document.visibilityState,
+        document.hasFocus(),
+      )
+    ) {
+      await sendJobSystemNotification(notice)
+    }
+  } catch {
+    // The in-app notice remains available when settings or native notifications fail.
+  }
+}
+
+onMounted(async () => {
+  unsubscribeJobEvents = jobsStore.subscribeJobEvents((job, previousStatus) => {
+    void handleJobEvent(job, previousStatus)
+  })
+  unsubscribeNotificationActions = await onDesktopNotificationAction((jobId) => {
+    void openNotifiedJob(jobId)
+  })
+  await Promise.allSettled([desktopStore.initialize(), jobsStore.initialize()])
+})
+
+onBeforeUnmount(() => {
+  unsubscribeJobEvents?.()
+  unsubscribeNotificationActions?.()
 })
 const icon = (component: typeof SparklesOutline) => () =>
   h(NIcon, null, { default: () => h(component) })
@@ -119,9 +169,59 @@ const pageDescription = computed(() =>
               </NButton>
             </div>
           </header>
+          <div v-if="jobNotice" class="job-notice" :class="`is-${jobNotice.kind}`" role="status">
+            <button
+              type="button"
+              class="job-notice-content"
+              @click="openNotifiedJob(jobNotice.jobId)"
+            >
+              <strong>{{ jobNotice.title }}</strong
+              ><small>{{ jobNotice.body }}</small>
+            </button>
+            <NButton quaternary circle aria-label="Dismiss notification" @click="jobNotice = null">
+              <template #icon><NIcon :component="CloseOutline" /></template>
+            </NButton>
+          </div>
           <main class="page-content"><RouterView /></main>
         </NLayoutContent>
       </NLayout>
     </NMessageProvider>
   </NConfigProvider>
 </template>
+
+<style scoped>
+.job-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 28px 14px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid rgba(127, 127, 127, 0.18);
+  border-left: 3px solid #ff66aa;
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.06);
+}
+.job-notice.is-warning {
+  border-left-color: #f0a020;
+}
+.job-notice.is-error {
+  border-left-color: #d03050;
+}
+.job-notice-content {
+  flex: 1;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.job-notice-content strong,
+.job-notice-content small {
+  display: block;
+}
+.job-notice-content small {
+  margin-top: 2px;
+  color: #858da0;
+}
+</style>

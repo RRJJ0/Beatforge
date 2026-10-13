@@ -42,6 +42,12 @@ import {
   selectSettingsImportFile,
 } from '@/services/desktop'
 import { useDesktopStore } from '@/stores/desktop'
+import {
+  desktopNotificationPermission,
+  requestDesktopNotificationPermission,
+  sendTestDesktopNotification,
+  type DesktopNotificationPermission,
+} from '@/services/notifications'
 import type {
   AppSettings,
   SettingsImportPreview,
@@ -66,6 +72,8 @@ const autoImport = ref(savedSettings.autoImport ?? true)
 const keepIntermediate = ref(savedSettings.keepIntermediate ?? false)
 const repairGeneratedOutput = ref(savedSettings.repairGeneratedOutput ?? true)
 const updates = ref(savedSettings.checkUpdates ?? true)
+const desktopNotifications = ref(savedSettings.desktopNotifications ?? true)
+const notificationPermission = ref<DesktopNotificationPermission>('unavailable')
 const checking = ref(false)
 const saving = ref(false)
 const transferring = ref(false)
@@ -101,6 +109,7 @@ function applySettings(settings: AppSettings) {
   keepIntermediate.value = settings.keepIntermediate
   repairGeneratedOutput.value = settings.repairGeneratedOutput
   updates.value = settings.checkUpdates
+  desktopNotifications.value = settings.desktopNotifications
 }
 
 function currentSettings(): AppSettings {
@@ -115,6 +124,7 @@ function currentSettings(): AppSettings {
     keepIntermediate: keepIntermediate.value,
     repairGeneratedOutput: repairGeneratedOutput.value,
     checkUpdates: updates.value,
+    desktopNotifications: desktopNotifications.value,
   }
 }
 
@@ -126,6 +136,7 @@ onMounted(async () => {
     message.error(`Could not load desktop settings: ${String(reason)}`)
   }
   await refreshStorage(true)
+  notificationPermission.value = await desktopNotificationPermission()
 })
 
 async function runDiagnostics() {
@@ -234,6 +245,23 @@ function importTagType(action: SettingsImportPreview['items'][number]['action'])
   if (action === 'ignored') return 'warning'
   if (action === 'reset') return 'info'
   return 'default'
+}
+
+async function enableNotificationPermission() {
+  notificationPermission.value = await requestDesktopNotificationPermission()
+  if (notificationPermission.value === 'granted') {
+    message.success('Windows notification permission is enabled.')
+  } else {
+    message.warning('Windows notifications are unavailable; in-app job notices will still work.')
+  }
+}
+
+async function testNotification() {
+  if (await sendTestDesktopNotification()) {
+    message.success('Test notification sent.')
+  } else {
+    message.warning('Windows notification could not be sent; in-app job notices remain available.')
+  }
 }
 
 function formatBytes(bytes: number) {
@@ -562,6 +590,34 @@ async function performStorageCleanup() {
           </div>
           <NSwitch v-model:value="updates" />
         </div>
+        <div class="setting-row">
+          <div>
+            <strong>Background job notifications</strong
+            ><small>Show a Windows notification when a background job finishes or fails.</small>
+          </div>
+          <NSwitch v-model:value="desktopNotifications" />
+        </div>
+        <div v-if="desktopNotifications" class="notification-permission">
+          <span>
+            Windows permission
+            <NTag
+              size="small"
+              round
+              :type="notificationPermission === 'granted' ? 'success' : 'warning'"
+            >
+              {{ notificationPermission }}
+            </NTag>
+          </span>
+          <NButton
+            v-if="notificationPermission !== 'granted'"
+            size="small"
+            secondary
+            @click="enableNotificationPermission"
+          >
+            Enable permission
+          </NButton>
+          <NButton v-else size="small" secondary @click="testNotification">Send test</NButton>
+        </div>
         <div class="app-version"><span>Beatforge Desktop</span><strong>0.1.0-alpha</strong></div>
       </NCard>
       <NCard class="panel-card" :bordered="false">
@@ -570,7 +626,7 @@ async function performStorageCleanup() {
             <h2 class="section-title">Backup & reset</h2>
             <p class="section-copy">Versioned JSON settings without model or song data.</p>
           </div>
-          <NTag round size="small">Schema v1</NTag>
+          <NTag round size="small">Schema v2</NTag>
         </div>
         <div class="transfer-actions">
           <NButton secondary :loading="transferring" @click="exportSettingsFile">
@@ -594,6 +650,7 @@ async function performStorageCleanup() {
               { label: 'Keep intermediate files', value: 'keepIntermediate' },
               { label: 'Generated output repair', value: 'repairGeneratedOutput' },
               { label: 'Update checks', value: 'checkUpdates' },
+              { label: 'Background notifications', value: 'desktopNotifications' },
             ]"
           />
           <NButton :loading="transferring" @click="restoreDefaults(false)">Reset selected</NButton>
@@ -779,6 +836,20 @@ async function performStorageCleanup() {
 }
 .app-version strong {
   color: inherit;
+}
+.notification-permission {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: #858da0;
+  font-size: 10px;
+}
+.notification-permission > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 .transfer-actions,
 .reset-control {
