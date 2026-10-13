@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import type {
   AppPaths,
   AppSettings,
@@ -13,6 +13,7 @@ import type {
   OsuInstallation,
   OsuImportLaunch,
   RuntimeInfo,
+  SettingsImportPreview,
   StartJobInput,
   SystemInfo,
   WorkerHealth,
@@ -66,6 +67,37 @@ export async function loadDesktopSettings() {
 
 export async function saveDesktopSettings(settings: AppSettings) {
   return invoke<void>('save_settings', { settings })
+}
+
+export async function selectSettingsImportFile(): Promise<string | null> {
+  if (!isDesktopRuntime()) return null
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: 'Beatforge settings', extensions: ['json'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function selectSettingsExportFile(): Promise<string | null> {
+  if (!isDesktopRuntime()) return null
+  const selected = await save({
+    defaultPath: 'beatforge-settings.json',
+    filters: [{ name: 'Beatforge settings', extensions: ['json'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function exportDesktopSettings(path: string, settings: AppSettings) {
+  return invoke<string>('export_settings', { path, settings })
+}
+
+export async function previewDesktopSettingsImport(path: string) {
+  return invoke<SettingsImportPreview>('preview_settings_import', { path })
+}
+
+export async function resetDesktopSettings(field?: keyof AppSettings) {
+  return invoke<AppSettings>('reset_settings', { field: field ?? null })
 }
 
 export async function createDesktopJob(input: StartJobInput) {

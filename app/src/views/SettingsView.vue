@@ -9,6 +9,7 @@ import {
   NIcon,
   NInput,
   NInputNumber,
+  NModal,
   NRadioButton,
   NRadioGroup,
   NSelect,
@@ -25,11 +26,17 @@ import {
 } from '@vicons/ionicons5'
 import {
   isDesktopRuntime,
+  exportDesktopSettings,
   loadDesktopSettings,
+  previewDesktopSettingsImport,
+  resetDesktopSettings,
   saveDesktopSettings,
   selectDirectory,
+  selectSettingsExportFile,
+  selectSettingsImportFile,
 } from '@/services/desktop'
 import { useDesktopStore } from '@/stores/desktop'
+import type { AppSettings, SettingsImportPreview } from '@/types'
 
 const message = useMessage()
 const desktopStore = useDesktopStore()
@@ -48,22 +55,43 @@ const repairGeneratedOutput = ref(savedSettings.repairGeneratedOutput ?? true)
 const updates = ref(savedSettings.checkUpdates ?? true)
 const checking = ref(false)
 const saving = ref(false)
+const transferring = ref(false)
+const resetField = ref<keyof AppSettings>('outputPath')
+const importPreview = ref<SettingsImportPreview | null>(null)
 const gpu = computed(() => desktopStore.system?.gpu)
+
+function applySettings(settings: AppSettings) {
+  outputPath.value = settings.outputPath
+  tempPath.value = settings.tempPath
+  osuPath.value = settings.osuPath
+  device.value = settings.device
+  precision.value = settings.precision === 'fp16' ? 'bf16' : settings.precision
+  workers.value = settings.workers
+  autoImport.value = settings.autoImport
+  keepIntermediate.value = settings.keepIntermediate
+  repairGeneratedOutput.value = settings.repairGeneratedOutput
+  updates.value = settings.checkUpdates
+}
+
+function currentSettings(): AppSettings {
+  return {
+    outputPath: outputPath.value,
+    tempPath: tempPath.value,
+    osuPath: osuPath.value,
+    device: device.value,
+    precision: precision.value,
+    workers: workers.value,
+    autoImport: autoImport.value,
+    keepIntermediate: keepIntermediate.value,
+    repairGeneratedOutput: repairGeneratedOutput.value,
+    checkUpdates: updates.value,
+  }
+}
 
 onMounted(async () => {
   if (!isDesktopRuntime()) return
   try {
-    const settings = await loadDesktopSettings()
-    outputPath.value = settings.outputPath
-    tempPath.value = settings.tempPath
-    osuPath.value = settings.osuPath
-    device.value = settings.device
-    precision.value = settings.precision === 'fp16' ? 'bf16' : settings.precision
-    workers.value = settings.workers
-    autoImport.value = settings.autoImport
-    keepIntermediate.value = settings.keepIntermediate
-    repairGeneratedOutput.value = settings.repairGeneratedOutput
-    updates.value = settings.checkUpdates
+    applySettings(await loadDesktopSettings())
   } catch (reason) {
     message.error(`Could not load desktop settings: ${String(reason)}`)
   }
@@ -92,18 +120,7 @@ async function browse(target: 'output' | 'temp' | 'osu') {
 }
 
 async function saveSettings() {
-  const settings = {
-    outputPath: outputPath.value,
-    tempPath: tempPath.value,
-    osuPath: osuPath.value,
-    device: device.value,
-    precision: precision.value,
-    workers: workers.value,
-    autoImport: autoImport.value,
-    keepIntermediate: keepIntermediate.value,
-    repairGeneratedOutput: repairGeneratedOutput.value,
-    checkUpdates: updates.value,
-  }
+  const settings = currentSettings()
   saving.value = true
   try {
     if (isDesktopRuntime()) await saveDesktopSettings(settings)
@@ -114,6 +131,78 @@ async function saveSettings() {
   } finally {
     saving.value = false
   }
+}
+
+async function exportSettingsFile() {
+  if (!isDesktopRuntime()) return message.info('Settings export is available in the desktop app.')
+  const path = await selectSettingsExportFile()
+  if (!path) return
+  transferring.value = true
+  try {
+    const exported = await exportDesktopSettings(path, currentSettings())
+    message.success(`Settings exported to ${exported}`)
+  } catch (reason) {
+    message.error(`Could not export settings: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+async function chooseSettingsImport() {
+  if (!isDesktopRuntime()) return message.info('Settings import is available in the desktop app.')
+  const path = await selectSettingsImportFile()
+  if (!path) return
+  transferring.value = true
+  try {
+    importPreview.value = await previewDesktopSettingsImport(path)
+  } catch (reason) {
+    message.error(`Could not preview settings import: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+async function applySettingsImport() {
+  if (!importPreview.value) return
+  transferring.value = true
+  try {
+    await saveDesktopSettings(importPreview.value.resultingSettings)
+    applySettings(importPreview.value.resultingSettings)
+    importPreview.value = null
+    message.success('Imported settings applied.')
+  } catch (reason) {
+    message.error(`Could not apply imported settings: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+async function restoreDefaults(all: boolean) {
+  if (!isDesktopRuntime()) return message.info('Settings reset is available in the desktop app.')
+  if (all && !window.confirm('Restore every setting to this machine’s defaults?')) return
+  transferring.value = true
+  try {
+    const settings = await resetDesktopSettings(all ? undefined : resetField.value)
+    applySettings(settings)
+    message.success(all ? 'All settings restored.' : `${resetField.value} restored.`)
+  } catch (reason) {
+    message.error(`Could not restore settings: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+function settingValue(value: unknown) {
+  if (value === undefined) return 'Not present'
+  if (value === '') return 'Empty'
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function importTagType(action: SettingsImportPreview['items'][number]['action']) {
+  if (action === 'apply') return 'success'
+  if (action === 'ignored') return 'warning'
+  if (action === 'reset') return 'info'
+  return 'default'
 }
 </script>
 
@@ -300,11 +389,97 @@ async function saveSettings() {
         </div>
         <div class="app-version"><span>Beatforge Desktop</span><strong>0.1.0-alpha</strong></div>
       </NCard>
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">Backup & reset</h2>
+            <p class="section-copy">Versioned JSON settings without model or song data.</p>
+          </div>
+          <NTag round size="small">Schema v1</NTag>
+        </div>
+        <div class="transfer-actions">
+          <NButton secondary :loading="transferring" @click="exportSettingsFile">
+            Export settings
+          </NButton>
+          <NButton secondary :loading="transferring" @click="chooseSettingsImport">
+            Import settings
+          </NButton>
+        </div>
+        <div class="reset-control">
+          <NSelect
+            v-model:value="resetField"
+            :options="[
+              { label: 'Output path', value: 'outputPath' },
+              { label: 'Temporary path', value: 'tempPath' },
+              { label: 'osu! path', value: 'osuPath' },
+              { label: 'Compute device', value: 'device' },
+              { label: 'Precision', value: 'precision' },
+              { label: 'Background workers', value: 'workers' },
+              { label: 'Automatic import', value: 'autoImport' },
+              { label: 'Keep intermediate files', value: 'keepIntermediate' },
+              { label: 'Generated output repair', value: 'repairGeneratedOutput' },
+              { label: 'Update checks', value: 'checkUpdates' },
+            ]"
+          />
+          <NButton :loading="transferring" @click="restoreDefaults(false)">Reset selected</NButton>
+        </div>
+        <NButton
+          block
+          tertiary
+          type="warning"
+          :loading="transferring"
+          @click="restoreDefaults(true)"
+        >
+          Restore all defaults
+        </NButton>
+      </NCard>
       <NButton type="primary" size="large" block :loading="saving" @click="saveSettings"
         ><template #icon><NIcon :component="SaveOutline" /></template>Save settings</NButton
       >
     </aside>
   </div>
+
+  <NModal :show="Boolean(importPreview)" @update:show="(show) => !show && (importPreview = null)">
+    <NCard class="import-preview" :bordered="false" role="dialog" aria-modal="true">
+      <div class="card-heading">
+        <div>
+          <h2 class="section-title">Review settings import</h2>
+          <p class="section-copy">
+            {{
+              importPreview?.schemaVersion === 0
+                ? 'Legacy settings'
+                : `Schema v${importPreview?.schemaVersion}`
+            }}
+            · <span class="mono">{{ importPreview?.sourcePath }}</span>
+          </p>
+        </div>
+      </div>
+      <NAlert type="info" :show-icon="false">
+        Machine-specific paths are applied only when they exist. Confirming changes settings only;
+        models, jobs, and songs are not imported.
+      </NAlert>
+      <div class="import-items">
+        <div v-for="item in importPreview?.items" :key="item.field" class="import-item">
+          <div>
+            <strong>{{ item.field }}</strong>
+            <small>{{ item.reason }}</small>
+          </div>
+          <div class="import-change">
+            <span class="mono">{{ settingValue(item.current) }}</span>
+            <span>→</span>
+            <span class="mono">{{ settingValue(item.result) }}</span>
+          </div>
+          <NTag size="small" round :type="importTagType(item.action)">{{ item.action }}</NTag>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <NButton @click="importPreview = null">Cancel</NButton>
+        <NButton type="primary" :loading="transferring" @click="applySettingsImport">
+          Apply imported settings
+        </NButton>
+      </div>
+    </NCard>
+  </NModal>
 </template>
 
 <style scoped>
@@ -384,6 +559,58 @@ async function saveSettings() {
 }
 .app-version strong {
   color: inherit;
+}
+.transfer-actions,
+.reset-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.reset-control {
+  margin: 14px 0 8px;
+}
+.import-preview {
+  width: min(820px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+.import-items {
+  display: grid;
+  margin-top: 14px;
+}
+.import-item {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(280px, 1.4fr) 90px;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.import-item strong,
+.import-item small {
+  display: block;
+}
+.import-item small {
+  margin-top: 3px;
+  color: #858da0;
+  font-size: 9px;
+}
+.import-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: #858da0;
+  font-size: 9px;
+}
+.import-change .mono {
+  overflow-wrap: anywhere;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
 }
 .detected-paths {
   display: grid;

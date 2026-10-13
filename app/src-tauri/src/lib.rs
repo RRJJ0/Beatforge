@@ -37,7 +37,7 @@ pub fn run_mock_worker() -> i32 {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AppPaths {
+pub(crate) struct AppPaths {
     root: String,
     models: String,
     runtime: String,
@@ -81,9 +81,12 @@ struct OsuInstallation {
     executable: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+const SETTINGS_SCHEMA_VERSION: u16 = 1;
+const MAX_SETTINGS_IMPORT_BYTES: u64 = 256 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AppSettings {
+pub(crate) struct AppSettings {
     output_path: String,
     temp_path: String,
     osu_path: String,
@@ -95,6 +98,48 @@ struct AppSettings {
     #[serde(default = "default_true")]
     repair_generated_output: bool,
     check_updates: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SettingsDocument {
+    schema_version: u16,
+    settings: AppSettings,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PartialAppSettings {
+    output_path: Option<String>,
+    temp_path: Option<String>,
+    osu_path: Option<String>,
+    device: Option<String>,
+    precision: Option<String>,
+    workers: Option<u8>,
+    auto_import: Option<bool>,
+    keep_intermediate: Option<bool>,
+    repair_generated_output: Option<bool>,
+    check_updates: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsImportItem {
+    field: String,
+    current: serde_json::Value,
+    imported: Option<serde_json::Value>,
+    result: serde_json::Value,
+    action: String,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsImportPreview {
+    schema_version: u16,
+    source_path: String,
+    items: Vec<SettingsImportItem>,
+    resulting_settings: AppSettings,
 }
 
 fn default_true() -> bool {
@@ -118,18 +163,345 @@ impl AppSettings {
     }
 }
 
+fn validate_settings(settings: &AppSettings) -> Result<(), String> {
+    for (label, value) in [
+        ("Output path", settings.output_path.as_str()),
+        ("Temporary path", settings.temp_path.as_str()),
+        ("osu! path", settings.osu_path.as_str()),
+    ] {
+        if value.chars().count() > 4096 || value.chars().any(char::is_control) {
+            return Err(format!("{label} is invalid"));
+        }
+    }
+    if settings.output_path.trim().is_empty() || settings.temp_path.trim().is_empty() {
+        return Err("Output and temporary paths cannot be empty".into());
+    }
+    if !matches!(settings.device.as_str(), "cuda" | "cpu" | "auto") {
+        return Err("Unsupported compute device setting".into());
+    }
+    if !matches!(settings.precision.as_str(), "bf16" | "fp32") {
+        return Err("Unsupported precision setting".into());
+    }
+    if !(1..=4).contains(&settings.workers) {
+        return Err("Background workers must be between 1 and 4".into());
+    }
+    Ok(())
+}
+
+fn migrate_legacy_settings(mut settings: AppSettings) -> AppSettings {
+    if settings.precision == "fp16" {
+        settings.precision = "bf16".into();
+    }
+    settings
+}
+
+fn settings_json(settings: &AppSettings) -> Result<String, String> {
+    serde_json::to_string_pretty(&SettingsDocument {
+        schema_version: SETTINGS_SCHEMA_VERSION,
+        settings: settings.clone(),
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn persist_settings(connection: &Connection, settings: &AppSettings) -> Result<(), String> {
+    validate_settings(settings)?;
+    let value = settings_json(settings)?;
+    connection
+        .execute(
+            "INSERT INTO settings(id, value, updated_at) VALUES (1, ?1, CURRENT_TIMESTAMP)
+             ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+            params![value],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn parse_stored_settings(json: &str) -> Result<(AppSettings, bool), String> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| format!("Stored settings are invalid: {error}"))?;
+    if value.get("schemaVersion").is_some() {
+        let document: SettingsDocument = serde_json::from_value(value)
+            .map_err(|error| format!("Stored settings document is invalid: {error}"))?;
+        if document.schema_version != SETTINGS_SCHEMA_VERSION {
+            return Err(format!(
+                "Unsupported settings schema version {}; expected {SETTINGS_SCHEMA_VERSION}",
+                document.schema_version
+            ));
+        }
+        let settings = migrate_legacy_settings(document.settings);
+        validate_settings(&settings)?;
+        Ok((settings, false))
+    } else {
+        let settings: AppSettings = serde_json::from_value(value)
+            .map_err(|error| format!("Legacy settings are invalid: {error}"))?;
+        let settings = migrate_legacy_settings(settings);
+        validate_settings(&settings)?;
+        Ok((settings, true))
+    }
+}
+
+fn import_path_is_usable(field: &str, value: &str) -> bool {
+    if field == "osuPath" && value.trim().is_empty() {
+        return true;
+    }
+    let path = Path::new(value);
+    if field == "osuPath" {
+        path.is_dir()
+            || (path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case("osu!.exe")))
+    } else {
+        path.is_dir()
+    }
+}
+
+fn preview_settings_json(
+    json: &str,
+    source_path: String,
+    current: &AppSettings,
+    defaults: &AppSettings,
+) -> Result<SettingsImportPreview, String> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| format!("Settings import is not valid JSON: {error}"))?;
+    let (schema_version, payload) = if let Some(version) = value.get("schemaVersion") {
+        let version = version
+            .as_u64()
+            .ok_or_else(|| "Settings schemaVersion must be an integer".to_string())?;
+        if version > u16::MAX as u64 || version as u16 != SETTINGS_SCHEMA_VERSION {
+            return Err(format!(
+                "Unsupported settings schema version {version}; expected {SETTINGS_SCHEMA_VERSION}"
+            ));
+        }
+        let object = value
+            .as_object()
+            .ok_or_else(|| "Settings document must be an object".to_string())?;
+        if object
+            .keys()
+            .any(|key| key != "schemaVersion" && key != "settings")
+        {
+            return Err("Settings document contains unknown top-level fields".into());
+        }
+        (
+            version as u16,
+            value
+                .get("settings")
+                .cloned()
+                .ok_or_else(|| "Settings document is missing settings".to_string())?,
+        )
+    } else {
+        (0, value)
+    };
+    let mut partial: PartialAppSettings = serde_json::from_value(payload)
+        .map_err(|error| format!("Settings import contains invalid or unknown fields: {error}"))?;
+    if partial.precision.as_deref() == Some("fp16") {
+        partial.precision = Some("bf16".into());
+    }
+    let mut result = current.clone();
+    let mut items = Vec::new();
+
+    macro_rules! portable_setting {
+        ($field:literal, $member:ident, $imported:expr) => {{
+            let imported = $imported;
+            let current_value = serde_json::to_value(&current.$member).unwrap();
+            let (value, action, reason) = match imported.as_ref() {
+                Some(value) => {
+                    let action = if value == &current.$member {
+                        "unchanged"
+                    } else {
+                        "apply"
+                    };
+                    (value.clone(), action, "Imported portable setting")
+                }
+                None => (
+                    defaults.$member.clone(),
+                    "reset",
+                    "Missing field uses the current schema default",
+                ),
+            };
+            result.$member = value.clone();
+            items.push(SettingsImportItem {
+                field: $field.into(),
+                current: current_value,
+                imported: imported.map(|value| serde_json::to_value(value).unwrap()),
+                result: serde_json::to_value(value).unwrap(),
+                action: action.into(),
+                reason: reason.into(),
+            });
+        }};
+    }
+
+    macro_rules! path_setting {
+        ($field:literal, $member:ident, $imported:expr) => {{
+            let imported = $imported;
+            let current_value = current.$member.clone();
+            let (value, action, reason) = match imported.as_ref() {
+                Some(value) if import_path_is_usable($field, value) => (
+                    value.clone(),
+                    if value == &current_value {
+                        "unchanged"
+                    } else {
+                        "apply"
+                    },
+                    "Imported path exists on this machine",
+                ),
+                Some(_) => (
+                    current_value.clone(),
+                    "ignored",
+                    "Imported machine-specific path does not exist or is not usable",
+                ),
+                None => (
+                    defaults.$member.clone(),
+                    "reset",
+                    "Missing field uses this machine's default path",
+                ),
+            };
+            result.$member = value.clone();
+            items.push(SettingsImportItem {
+                field: $field.into(),
+                current: serde_json::Value::String(current_value),
+                imported: imported.map(serde_json::Value::String),
+                result: serde_json::Value::String(value),
+                action: action.into(),
+                reason: reason.into(),
+            });
+        }};
+    }
+
+    path_setting!("outputPath", output_path, partial.output_path);
+    path_setting!("tempPath", temp_path, partial.temp_path);
+    path_setting!("osuPath", osu_path, partial.osu_path);
+    portable_setting!("device", device, partial.device);
+    portable_setting!("precision", precision, partial.precision);
+    portable_setting!("workers", workers, partial.workers);
+    portable_setting!("autoImport", auto_import, partial.auto_import);
+    portable_setting!(
+        "keepIntermediate",
+        keep_intermediate,
+        partial.keep_intermediate
+    );
+    portable_setting!(
+        "repairGeneratedOutput",
+        repair_generated_output,
+        partial.repair_generated_output
+    );
+    portable_setting!("checkUpdates", check_updates, partial.check_updates);
+    result = migrate_legacy_settings(result);
+    validate_settings(&result)
+        .map_err(|error| format!("Imported settings would be invalid: {error}"))?;
+
+    Ok(SettingsImportPreview {
+        schema_version,
+        source_path,
+        items,
+        resulting_settings: result,
+    })
+}
+
 #[cfg(test)]
 mod settings_tests {
-    use super::AppSettings;
+    use super::{
+        AppSettings, SETTINGS_SCHEMA_VERSION, parse_stored_settings, preview_settings_json,
+        settings_json,
+    };
+
+    fn settings(root: &str) -> AppSettings {
+        AppSettings {
+            output_path: root.into(),
+            temp_path: root.into(),
+            osu_path: String::new(),
+            device: "cuda".into(),
+            precision: "bf16".into(),
+            workers: 2,
+            auto_import: true,
+            keep_intermediate: false,
+            repair_generated_output: true,
+            check_updates: true,
+        }
+    }
 
     #[test]
     fn legacy_settings_enable_generated_output_repair() {
-        let settings: AppSettings = serde_json::from_str(
-            r#"{"outputPath":"out","tempPath":"temp","osuPath":"","device":"cuda","precision":"bf16","workers":2,"autoImport":true,"keepIntermediate":false,"checkUpdates":true}"#,
+        let (settings, migrated) = parse_stored_settings(
+            r#"{"outputPath":"out","tempPath":"temp","osuPath":"","device":"cuda","precision":"fp16","workers":2,"autoImport":true,"keepIntermediate":false,"checkUpdates":true}"#,
         )
         .unwrap();
 
+        assert!(migrated);
         assert!(settings.repair_generated_output);
+        assert_eq!(settings.precision, "bf16");
+        let exported = settings_json(&settings).unwrap();
+        assert!(exported.contains(&format!(r#""schemaVersion": {SETTINGS_SCHEMA_VERSION}"#)));
+    }
+
+    #[test]
+    fn import_preview_ignores_missing_machine_path_and_resets_missing_fields() {
+        let root = std::env::temp_dir();
+        let root_text = root.to_string_lossy();
+        let current = settings(&root_text);
+        let mut defaults = current.clone();
+        defaults.device = "cuda".into();
+        let json = format!(
+            r#"{{"schemaVersion":1,"settings":{{"outputPath":"Z:\\missing-output","tempPath":{},"osuPath":"","device":"cpu","precision":"fp32","workers":1,"autoImport":false,"keepIntermediate":true,"checkUpdates":false}}}}"#,
+            serde_json::to_string(root_text.as_ref()).unwrap()
+        );
+
+        let preview =
+            preview_settings_json(&json, "settings.json".into(), &current, &defaults).unwrap();
+
+        assert_eq!(preview.schema_version, 1);
+        assert_eq!(preview.resulting_settings.output_path, current.output_path);
+        assert_eq!(preview.resulting_settings.device, "cpu");
+        assert!(preview.resulting_settings.repair_generated_output);
+        assert!(
+            preview
+                .items
+                .iter()
+                .any(|item| item.field == "outputPath" && item.action == "ignored")
+        );
+        assert!(
+            preview
+                .items
+                .iter()
+                .any(|item| { item.field == "repairGeneratedOutput" && item.action == "reset" })
+        );
+    }
+
+    #[test]
+    fn newer_or_unknown_settings_documents_are_rejected() {
+        let current = settings(".");
+        assert!(
+            preview_settings_json(
+                r#"{"schemaVersion":99,"settings":{}}"#,
+                "newer.json".into(),
+                &current,
+                &current,
+            )
+            .is_err()
+        );
+        assert!(
+            preview_settings_json(
+                r#"{"schemaVersion":1,"settings":{"surprise":true}}"#,
+                "unknown.json".into(),
+                &current,
+                &current,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn exported_schema_round_trips_through_import_preview() {
+        let root = std::env::temp_dir();
+        let original = settings(&root.to_string_lossy());
+        let json = settings_json(&original).unwrap();
+        let preview =
+            preview_settings_json(&json, "round-trip.json".into(), &original, &original).unwrap();
+
+        assert_eq!(preview.schema_version, SETTINGS_SCHEMA_VERSION);
+        assert_eq!(preview.resulting_settings, original);
+        assert!(preview.items.iter().all(|item| item.action == "unchanged"));
     }
 }
 
@@ -383,30 +755,100 @@ fn load_settings_value(app: &AppHandle) -> Result<AppSettings, String> {
         })
         .optional()
         .map_err(|error| error.to_string())?;
-    let mut settings = match value {
-        Some(json) => serde_json::from_str(&json).map_err(|error| error.to_string())?,
-        None => AppSettings::default_for(&paths),
-    };
-    // V32 uses bf16 on CUDA. Migrate the old fp16 default, which can produce
-    // invalid sampling probabilities during timing generation.
-    if settings.precision == "fp16" {
-        settings.precision = "bf16".into();
+    match value {
+        Some(json) => {
+            let (settings, migrated) = parse_stored_settings(&json)?;
+            if migrated {
+                persist_settings(&connection, &settings)?;
+            }
+            Ok(settings)
+        }
+        None => Ok(AppSettings::default_for(&paths)),
     }
-    Ok(settings)
 }
 
 #[tauri::command]
 fn save_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     let (connection, _) = open_database(&app)?;
-    let value = serde_json::to_string(&settings).map_err(|error| error.to_string())?;
-    connection
-        .execute(
-            "INSERT INTO settings(id, value, updated_at) VALUES (1, ?1, CURRENT_TIMESTAMP)
-     ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-            params![value],
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    persist_settings(&connection, &migrate_legacy_settings(settings))
+}
+
+#[tauri::command]
+fn export_settings(path: String, settings: AppSettings) -> Result<String, String> {
+    let target = PathBuf::from(&path);
+    if !target
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("json"))
+    {
+        return Err("Settings export must use a .json file".into());
+    }
+    let parent = target
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or_else(|| "Settings export folder does not exist".to_string())?;
+    let target = parent.join(
+        target
+            .file_name()
+            .ok_or_else(|| "Settings export filename is invalid".to_string())?,
+    );
+    validate_settings(&settings)?;
+    fs::write(&target, settings_json(&settings)?)
+        .map_err(|error| format!("Could not export settings: {error}"))?;
+    Ok(path_string(&target))
+}
+
+#[tauri::command]
+fn preview_settings_import(app: AppHandle, path: String) -> Result<SettingsImportPreview, String> {
+    let source = PathBuf::from(&path);
+    if !source
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("json"))
+    {
+        return Err("Settings import must use a .json file".into());
+    }
+    let metadata = source
+        .metadata()
+        .map_err(|error| format!("Could not inspect settings import: {error}"))?;
+    if !metadata.is_file() || metadata.len() > MAX_SETTINGS_IMPORT_BYTES {
+        return Err("Settings import must be a regular JSON file no larger than 256 KiB".into());
+    }
+    let json = fs::read_to_string(&source)
+        .map_err(|error| format!("Could not read settings import as UTF-8: {error}"))?;
+    let current = load_settings_value(&app)?;
+    let paths = build_paths(&app)?;
+    preview_settings_json(
+        &json,
+        path_string(&source),
+        &current,
+        &AppSettings::default_for(&paths),
+    )
+}
+
+#[tauri::command]
+fn reset_settings(app: AppHandle, field: Option<String>) -> Result<AppSettings, String> {
+    let (connection, paths) = open_database(&app)?;
+    let defaults = AppSettings::default_for(&paths);
+    let mut settings = load_settings_value(&app)?;
+    match field.as_deref() {
+        None => settings = defaults,
+        Some("outputPath") => settings.output_path = defaults.output_path,
+        Some("tempPath") => settings.temp_path = defaults.temp_path,
+        Some("osuPath") => settings.osu_path = defaults.osu_path,
+        Some("device") => settings.device = defaults.device,
+        Some("precision") => settings.precision = defaults.precision,
+        Some("workers") => settings.workers = defaults.workers,
+        Some("autoImport") => settings.auto_import = defaults.auto_import,
+        Some("keepIntermediate") => settings.keep_intermediate = defaults.keep_intermediate,
+        Some("repairGeneratedOutput") => {
+            settings.repair_generated_output = defaults.repair_generated_output
+        }
+        Some("checkUpdates") => settings.check_updates = defaults.check_updates,
+        Some(_) => return Err("Unknown settings field".into()),
+    }
+    persist_settings(&connection, &settings)?;
+    Ok(settings)
 }
 
 fn next_job_id() -> String {
@@ -1278,6 +1720,9 @@ pub fn run() {
             detect_osu_installations,
             load_settings,
             save_settings,
+            export_settings,
+            preview_settings_import,
+            reset_settings,
             create_job,
             list_jobs,
             list_managed_packages,

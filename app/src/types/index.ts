@@ -268,3 +268,19 @@ export interface AppSettings {
   repairGeneratedOutput: boolean
   checkUpdates: boolean
 }
+
+export interface SettingsImportItem {
+  field: keyof AppSettings
+  current: unknown
+  imported?: unknown
+  result: unknown
+  action: 'apply' | 'ignored' | 'reset' | 'unchanged'
+  reason: string
+}
+
+export interface SettingsImportPreview {
+  schemaVersion: number
+  sourcePath: string
+  items: SettingsImportItem[]
+  resultingSettings: AppSettings
+}

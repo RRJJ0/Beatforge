@@ -656,7 +656,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 - [x] 7.1：建立正式歷史資料檢視、搜尋、篩選與排序。
 - [x] 7.2：完成歷史任務刪除、重新生成與檔案一致性處理。
-- [ ] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
+- [x] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
 - [ ] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
 - [ ] 7.5：加入桌面通知與背景任務完成／失敗提示。
 - [ ] 7.6：加入輕量音訊、時間軸與物件密度預覽。
@@ -685,12 +685,14 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.3 設定預設值、匯入／匯出與 migration
 
-- 定義 versioned settings schema、平台預設值、欄位驗證與向後相容 migration。
-- 提供 JSON 設定匯出與匯入預覽；匯入前列出將變更、忽略或重設的欄位。
-- 敏感、機器限定或不存在的路徑不盲目套用，匯入失敗不破壞目前設定。
-- 提供單項或全部恢復預設值，並測試舊版本設定升級。
+- Settings database value 與匯出檔使用 schema v1 文件，包含 `schemaVersion` 與完整 `settings` payload；既有無版本 JSON 會在首次讀取時遷移並重新保存，舊 `fp16` 值同步正規化為 V32 使用的 `bf16`。
+- 保存與匯入會驗證 device、precision、worker count、必要路徑字串及未知欄位；較新 schema、損壞 JSON、非 UTF-8、超過 256 KiB 或非 `.json` regular file 會在修改設定前拒絕。
+- Settings UI 提供 JSON 匯出與兩階段匯入。Preview 逐欄顯示 current、result、`apply`／`ignored`／`reset`／`unchanged` 與原因，確認後才保存。
+- output、temporary 與 osu! path 視為機器限定欄位；匯入路徑不存在或不適用時保留目前值並標記 ignored，缺少欄位則使用目前 schema／機器預設值。
+- Backup & reset 可恢復單一欄位或經確認後恢復全部預設值；匯出內容不包含歌曲、模型、job、artifact 或其他資料庫內容。
+- Rust 測試涵蓋 legacy migration、fp16 migration、版本化輸出、缺少欄位 reset、不存在路徑 ignored，以及較新 schema／未知欄位拒絕。
 
-驗收：設定可跨重啟保存；合法設定可往返匯出／匯入，損壞或較新版本檔案會被安全拒絕。
+驗收：設定可跨重啟保存；合法設定可往返匯出／preview／套用，損壞或較新版本檔案會被安全拒絕。Rust settings 測試、前端單元測試、type-check、lint 與 production build 通過。
 
 #### 7.4 磁碟用量與安全清理
 
