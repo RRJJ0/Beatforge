@@ -43,4 +43,25 @@ describe('jobs store', () => {
     await store.removeJob(id)
     expect(store.jobs.some((job) => job.id === id)).toBe(false)
   })
+
+  it('does not count a completed history record whose result file is missing', () => {
+    const store = useJobsStore()
+    store.jobs.unshift({
+      id: 'BF-MISSING',
+      title: 'Missing result',
+      artist: 'Test Artist',
+      audioFile: 'track.mp3',
+      model: 'mapperatorinator-v32-standard',
+      difficulty: 4.5,
+      status: 'completed',
+      progress: 100,
+      stage: 'Completed and validated',
+      scenario: 'success',
+      createdAt: '2026-10-13T00:00:00Z',
+      outputPath: 'C:\\missing\\result.osz',
+      outputAvailable: false,
+    })
+
+    expect(store.completedJobs.some((job) => job.id === 'BF-MISSING')).toBe(false)
+  })
 })

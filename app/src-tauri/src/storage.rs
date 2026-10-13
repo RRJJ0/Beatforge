@@ -244,7 +244,7 @@ fn scan_path(path: &Path) -> Result<ScanSummary, String> {
     Ok(summary)
 }
 
-fn category_root<'a>(paths: &'a AppPaths, category: StorageCategory) -> &'a Path {
+fn category_root(paths: &AppPaths, category: StorageCategory) -> &Path {
     match category {
         StorageCategory::Runtime => Path::new(&paths.runtime),
         StorageCategory::Models => Path::new(&paths.models),

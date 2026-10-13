@@ -92,7 +92,10 @@ const visibleJobs = computed(() => {
   return filtered.value.slice(start, start + PAGE_SIZE)
 })
 const completedCount = computed(
-  () => jobsStore.jobs.filter((job) => job.status === 'completed').length,
+  () =>
+    jobsStore.jobs.filter(
+      (job) => job.status === 'completed' && job.outputAvailable !== false,
+    ).length,
 )
 const issueCount = computed(
   () =>
@@ -253,6 +256,12 @@ function openPreview(jobId: string) {
                   >{{ job.artist }} · <span class="mono">{{ job.id }}</span></small
                 >
                 <small class="audio-path">{{ job.audioFile }}</small>
+                <small
+                  v-if="job.status === 'completed' && job.outputPath && job.outputAvailable === false"
+                  class="missing-output"
+                >
+                  {{ t('jobs.outputMissing') }}
+                </small>
               </div>
             </div>
             <div>
@@ -267,7 +276,7 @@ function openPreview(jobId: string) {
             <span class="secondary">{{ formatJobDate(job.createdAt) }}</span>
             <div class="row-actions">
               <NButton
-                v-if="job.status === 'completed' && job.outputPath && isDesktopRuntime()"
+                v-if="job.status === 'completed' && job.outputPath && job.outputAvailable !== false && isDesktopRuntime()"
                 secondary
                 circle
                 size="small"
@@ -278,7 +287,7 @@ function openPreview(jobId: string) {
                 <template #icon><NIcon :component="EyeOutline" /></template>
               </NButton>
               <NButton
-                v-if="job.status === 'completed' && job.outputPath && isDesktopRuntime()"
+                v-if="job.status === 'completed' && job.outputPath && job.outputAvailable !== false && isDesktopRuntime()"
                 quaternary
                 circle
                 size="small"
@@ -289,7 +298,7 @@ function openPreview(jobId: string) {
                 <template #icon><NIcon :component="FolderOpenOutline" /></template>
               </NButton>
               <NButton
-                v-if="job.status === 'completed' && job.outputPath && isDesktopRuntime()"
+                v-if="job.status === 'completed' && job.outputPath && job.outputAvailable !== false && isDesktopRuntime()"
                 secondary
                 circle
                 size="small"
@@ -429,6 +438,10 @@ function openPreview(jobId: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.map-copy .missing-output {
+  color: #d03050;
+  white-space: normal;
 }
 .row-actions {
   display: flex;

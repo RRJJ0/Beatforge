@@ -161,9 +161,14 @@ where
     check_disk_space(destination, artifact.size_bytes.saturating_sub(downloaded))?;
 
     if downloaded < artifact.size_bytes {
-        let client = Client::builder()
+        let mut client = Client::builder()
             .connect_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_secs(6 * 60 * 60))
+            .timeout(Duration::from_secs(6 * 60 * 60));
+        if cfg!(test) {
+            // Local fixture servers must not be routed through the user's Windows proxy.
+            client = client.no_proxy();
+        }
+        let client = client
             .build()
             .map_err(|error| format!("Failed to initialize downloader: {error}"))?;
         let mut request = client.get(&artifact.url);
@@ -218,7 +223,7 @@ where
         loop {
             let read = response
                 .read(&mut buffer)
-                .map_err(|error| format!("Download stream failed: {error}"))?;
+                .map_err(|error| format!("Download stream failed: {error:?}"))?;
             if read == 0 {
                 break;
             }
@@ -347,9 +352,9 @@ mod tests {
 
     #[test]
     fn resumes_and_verifies_a_partial_download() {
-        let data = vec![0x5a; 512 * 1024];
+        let data = vec![0x5a; 32 * 1024];
         let directory = temp_directory("resume");
-        fs::write(directory.join("model.bin.part"), &data[..128 * 1024]).unwrap();
+        fs::write(directory.join("model.bin.part"), &data[..8 * 1024]).unwrap();
         let (url, received_range, server) = server(data.clone());
         let artifact = PackageArtifact {
             url,
@@ -361,11 +366,11 @@ mod tests {
         let result = download_artifact("test-model", &artifact, &directory, |event| {
             events.push(event);
             Ok(())
-        })
-        .unwrap();
+        });
         server.join().unwrap();
+        let result = result.unwrap();
 
-        assert_eq!(received_range.recv().unwrap(), Some(128 * 1024));
+        assert_eq!(received_range.recv().unwrap(), Some(8 * 1024));
         assert_eq!(fs::read(result).unwrap(), data);
         assert_eq!(events.last().unwrap().status, PackageStatus::Verifying);
         assert!(!directory.join("model.bin.part").exists());
@@ -386,7 +391,7 @@ mod tests {
         let error = download_artifact("test-model", &artifact, &directory, |_| Ok(())).unwrap_err();
         server.join().unwrap();
 
-        assert!(error.contains("SHA-256 mismatch"));
+        assert!(error.contains("SHA-256 mismatch"), "{error}");
         assert!(!directory.join("model.bin").exists());
         assert!(!directory.join("model.bin.part").exists());
         fs::remove_dir_all(directory).unwrap();

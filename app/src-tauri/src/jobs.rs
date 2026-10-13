@@ -4,6 +4,7 @@ use crate::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +20,8 @@ pub struct JobRecord {
     pub stage: String,
     pub error_message: Option<String>,
     pub output_path: Option<String>,
+    #[serde(default)]
+    pub output_available: bool,
     pub scenario: String,
     pub created_at: String,
     pub provenance: Option<serde_json::Value>,
@@ -93,6 +96,10 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
     let validation_report = row
         .get::<_, Option<String>>(14)?
         .and_then(|value| serde_json::from_str(&value).ok());
+    let output_path: Option<String> = row.get(10)?;
+    let output_available = output_path
+        .as_deref()
+        .is_some_and(|path| Path::new(path).is_file());
     Ok(JobRecord {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -104,7 +111,8 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
         progress: row.get(7)?,
         stage: row.get(8)?,
         error_message: row.get(9)?,
-        output_path: row.get(10)?,
+        output_path,
+        output_available,
         scenario: row.get(11)?,
         created_at: row.get(12)?,
         provenance,
@@ -488,7 +496,68 @@ mod tests {
         let persisted = get(&connection, "BF-VALIDATED").unwrap().unwrap();
         assert_eq!(persisted.status, "completed");
         assert_eq!(persisted.validation_report, Some(report));
+        assert!(!persisted.output_available);
         assert!(persisted.output_path.unwrap().contains("validated"));
+    }
+
+    #[test]
+    fn completed_job_reports_when_its_output_is_removed() {
+        let connection = version_one_database();
+        migrate(&connection).unwrap();
+        let input = StartJobInput {
+            title: "Artifact state".into(),
+            artist: "Artist".into(),
+            audio_file: "test.wav".into(),
+            model: crate::packages::STANDARD_MODEL_ID.into(),
+            difficulty: 4.0,
+            gamemode: 0,
+            seed: 7,
+            descriptors: vec![],
+            negative_descriptors: vec![],
+            reference_beatmap: None,
+            approach_rate: None,
+            circle_size: None,
+            hitsounded: true,
+            scenario: "success".into(),
+        };
+        insert(&connection, "BF-ARTIFACT", &input).unwrap();
+
+        let unique = format!(
+            "beatforge-job-artifact-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&directory).unwrap();
+        let artifact = directory.join("result.osz");
+        std::fs::write(&artifact, b"fixture").unwrap();
+        update_state(
+            &connection,
+            "BF-ARTIFACT",
+            "completed",
+            100,
+            "Completed",
+            None,
+            artifact.to_str(),
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            get(&connection, "BF-ARTIFACT")
+                .unwrap()
+                .unwrap()
+                .output_available
+        );
+        std::fs::remove_file(&artifact).unwrap();
+        let restored = get(&connection, "BF-ARTIFACT").unwrap().unwrap();
+        assert_eq!(restored.status, "completed");
+        assert!(!restored.output_available);
+        assert_eq!(restored.output_path.as_deref(), artifact.to_str());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -116,6 +116,7 @@ export interface GenerationJob {
   eta?: string
   errorMessage?: string
   outputPath?: string
+  outputAvailable?: boolean
   provenance?: GenerationProvenance | null
   validationReport?: ValidationReport | null
 }

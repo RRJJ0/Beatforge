@@ -45,7 +45,9 @@ export const useJobsStore = defineStore('jobs', () => {
     () =>
       jobs.value.filter((job) => ['running', 'queued', 'validating'].includes(job.status)).length,
   )
-  const completedJobs = computed(() => jobs.value.filter((job) => job.status === 'completed'))
+  const completedJobs = computed(() =>
+    jobs.value.filter((job) => job.status === 'completed' && job.outputAvailable !== false),
+  )
   const completedToday = computed(() => completedJobs.value.length)
 
   function upsert(job: GenerationJob) {

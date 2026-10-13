@@ -661,7 +661,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 - [x] 7.5：加入桌面通知與背景任務完成／失敗提示。
 - [x] 7.6：加入輕量音訊、時間軸與物件密度預覽。
 - [x] 7.7：完成繁體中文／英文介面與 accessibility 改善。
-- [ ] 7.8：執行產品整合、migration 與日常流程驗收。
+- [x] 7.8：執行產品整合、migration 與日常流程驗收。
 
 #### 7.1 歷史檢視、搜尋與篩選
 
@@ -740,10 +740,10 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 
 #### 7.8 產品整合與日常流程驗收
 
-- 串接 History、Settings、storage、notifications、preview 與既有生成／驗證／匯入流程。
-- 測試由舊資料庫與舊設定升級、重啟恢復、遺失檔案、磁碟不足與清理後狀態。
-- 在一般 Windows 使用者環境完成不查看命令列的日常流程測試。
-- 記錄已知限制、驗收結果與階段 8 發布前仍需處理的項目。
+- History、Settings、storage、notifications 與 preview 已接回既有生成／驗證／匯入流程；完成狀態現在另外回報 `outputAvailable`，實體成果被移走或清理後仍保留歷史，但 UI 會明確標示檔案不存在，且不再顯示預覽、開啟與匯入動作。
+- 自動化涵蓋舊 jobs schema、共用 migration marker 修復、legacy／v1／v2 settings 升至 v3、重啟中斷復原、遺失成果、磁碟 reserve、storage preview／cleanup，以及 runtime/model/download/validation/osu! handoff 安全案例。
+- Windows release build 已使用既有 application profile 執行無命令列 smoke test：成功還原 19 筆歷史、設定、繁中介面與 runtime 狀態，並開啟真實成果的音訊波形、時間軸與 905-object density preview；7 筆仍存在的 validated deliverable 與遺失成果能正確區分。
+- 前端 13 項與 Rust 111 項測試、type-check、lint、Clippy warnings-as-errors、production build 及 Tauri no-bundle release build 通過。完整矩陣、實機記錄、已知限制與後續階段待辦見 `docs/testing/stage-7-product-acceptance.md`。
 
 驗收：一般使用者可從生成、背景等待、通知、歷史查找、預覽到 osu! 匯入完成完整流程；歷史、設定與實體檔案保持一致。
 
@@ -768,9 +768,53 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - 歷史紀錄與實體檔案狀態一致。
 - 鍵盤可以操作所有主要流程。
 
-### 階段 8：測試、封裝與發布
+### 階段 8：譜面集與媒體內容
 
-目標：建立可重現、可更新和可支援的 Windows 發布流程。
+目標：讓單次專案能產生完整的 beatmap set，並支援帶有視覺內容的 `.osz`。
+
+規劃子項目：
+
+- [ ] 8.1：同一首歌曲一次建立多個難度，輸出為同一個 beatmap set。
+- [ ] 8.2：允許選擇並封裝背景圖片。
+- [ ] 8.3：允許選擇並封裝背景影片或其他 osu! 支援的影片內容。
+- [ ] 8.4：生成的 `.osz` 使用 `[Artist] - Song name.osz` 格式命名。
+
+#### 8.1 多難度 Beatmap Set
+
+- 讓使用者為同一首歌設定多個目標難度，並建立各自的 difficulty name、生成參數與 seed。
+- 共用音訊、歌曲 metadata、背景與其他 set-level 資源，避免在 `.osz` 中重複封裝。
+- 每個 difficulty 必須分別執行 validation、statistics 與 provenance 紀錄；單一難度失敗時不得默默污染其他難度。
+- 匯出時建立一個包含所有有效 difficulty 的 `.osz`，並在 Jobs／History 顯示整個 set 與各難度狀態。
+
+#### 8.2 背景圖片
+
+- 允許使用者選擇本機圖片作為 beatmap background，並在生成前預覽。
+- 驗證檔案格式、大小、尺寸與安全檔名，再複製至受管理的 job 工作目錄。
+- 將背景引用寫入每個 difficulty 的 `[Events]`，封裝後確認引用資源存在且可由 osu!／lazer 載入。
+
+#### 8.3 背景影片
+
+- 允許使用者選擇本機影片，設定開始時間並封裝至 `.osz`。
+- 驗證格式、檔案大小、時間偏移與資源引用；第一版不自動轉碼或修改原始影片。
+- 顯示影片對輸出大小及匯入時間的影響，並允許在匯出前停用影片。
+
+#### 8.4 `.osz` 輸出命名
+
+- 預設以 beatmap metadata 產生 `[Artist] - Song name.osz`，取代目前偏向 job identity 的檔名。
+- 清理 Windows 不允許的檔名字元、保留名稱、尾端空白與句點，同時避免產生空白或過長檔名。
+- 同名輸出不得靜默覆寫既有檔案，應加入穩定的序號或其他可辨識後綴。
+- job 內部仍使用不可混淆的 identity 管理 `raw`、`validated` 與 provenance；易讀檔名只用於交付與匯入 artifact。
+
+初步驗收條件：
+
+- 同一首歌可匯出至少兩個不同難度，osu!／lazer 將它們辨識為同一個 beatmap set。
+- 所有 difficulty 共用正確的音訊與背景資源，且個別 validation／statistics 可追蹤。
+- 加入圖片或影片後，封裝、重新驗證、重啟還原與匯入流程仍保持非破壞性。
+- 輸出的 `.osz` 使用可辨識的 artist／song name 命名，且特殊字元與同名歌曲不會造成匯出失敗或覆寫。
+
+### 階段 9：測試、封裝與發布
+
+目標：在譜面集與媒體內容的基礎結構穩定後，建立可重現、可更新和可支援的 Windows 發布流程。
 
 工作項目：
 
@@ -794,50 +838,6 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - 全新支援環境可由 installer 完成安裝並生成測試譜面。
 - 應用程式更新不會刪除模型、設定或歷史。
 - 使用者可在不暴露歌曲內容的情況下匯出診斷資訊。
-
-### 階段 9：譜面集與媒體內容
-
-目標：讓單次專案能產生完整的 beatmap set，並支援帶有視覺內容的 `.osz`。
-
-規劃子項目：
-
-- [ ] 9.1：同一首歌曲一次建立多個難度，輸出為同一個 beatmap set。
-- [ ] 9.2：允許選擇並封裝背景圖片。
-- [ ] 9.3：允許選擇並封裝背景影片或其他 osu! 支援的影片內容。
-- [ ] 9.4：生成的 `.osz` 使用 `[Artist] - Song name.osz` 格式命名。
-
-#### 9.1 多難度 Beatmap Set
-
-- 讓使用者為同一首歌設定多個目標難度，並建立各自的 difficulty name、生成參數與 seed。
-- 共用音訊、歌曲 metadata、背景與其他 set-level 資源，避免在 `.osz` 中重複封裝。
-- 每個 difficulty 必須分別執行 validation、statistics 與 provenance 紀錄；單一難度失敗時不得默默污染其他難度。
-- 匯出時建立一個包含所有有效 difficulty 的 `.osz`，並在 Jobs／History 顯示整個 set 與各難度狀態。
-
-#### 9.2 背景圖片
-
-- 允許使用者選擇本機圖片作為 beatmap background，並在生成前預覽。
-- 驗證檔案格式、大小、尺寸與安全檔名，再複製至受管理的 job 工作目錄。
-- 將背景引用寫入每個 difficulty 的 `[Events]`，封裝後確認引用資源存在且可由 osu!／lazer 載入。
-
-#### 9.3 背景影片
-
-- 允許使用者選擇本機影片，設定開始時間並封裝至 `.osz`。
-- 驗證格式、檔案大小、時間偏移與資源引用；第一版不自動轉碼或修改原始影片。
-- 顯示影片對輸出大小及匯入時間的影響，並允許在匯出前停用影片。
-
-#### 9.4 `.osz` 輸出命名
-
-- 預設以 beatmap metadata 產生 `[Artist] - Song name.osz`，取代目前偏向 job identity 的檔名。
-- 清理 Windows 不允許的檔名字元、保留名稱、尾端空白與句點，同時避免產生空白或過長檔名。
-- 同名輸出不得靜默覆寫既有檔案，應加入穩定的序號或其他可辨識後綴。
-- job 內部仍使用不可混淆的 identity 管理 `raw`、`validated` 與 provenance；易讀檔名只用於交付與匯入 artifact。
-
-初步驗收條件：
-
-- 同一首歌可匯出至少兩個不同難度，osu!／lazer 將它們辨識為同一個 beatmap set。
-- 所有 difficulty 共用正確的音訊與背景資源，且個別 validation／statistics 可追蹤。
-- 加入圖片或影片後，封裝、重新驗證、重啟還原與匯入流程仍保持非破壞性。
-- 輸出的 `.osz` 使用可辨識的 artist／song name 命名，且特殊字元與同名歌曲不會造成匯出失敗或覆寫。
 
 ## 建議專案結構
 

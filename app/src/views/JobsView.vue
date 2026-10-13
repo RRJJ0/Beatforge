@@ -171,6 +171,12 @@ function openPreview(jobId: string) {
           <div v-else class="job-stage">{{ job.stage }}</div>
           <div v-if="job.errorMessage" class="job-error">{{ job.errorMessage }}</div>
           <div v-if="job.outputPath" class="job-output mono">{{ job.outputPath }}</div>
+          <div
+            v-if="job.status === 'completed' && job.outputPath && job.outputAvailable === false"
+            class="job-error"
+          >
+            {{ t('jobs.outputMissing') }}
+          </div>
           <div v-if="job.provenance" class="job-provenance">
             <span class="mono">Run {{ job.provenance.reproduction_key.slice(0, 12) }}</span>
             <span>{{ job.provenance.runtime.gpu_name ?? job.provenance.runtime.device }}</span>
@@ -208,7 +214,7 @@ function openPreview(jobId: string) {
         </div>
         <div class="job-actions">
           <NButton
-            v-if="job.status === 'completed' && job.outputPath"
+            v-if="job.status === 'completed' && job.outputPath && job.outputAvailable !== false"
             secondary
             circle
             size="small"
@@ -218,7 +224,7 @@ function openPreview(jobId: string) {
             ><template #icon><NIcon :component="EyeOutline" /></template
           ></NButton>
           <NButton
-            v-if="job.status === 'completed' && job.outputPath"
+            v-if="job.status === 'completed' && job.outputPath && job.outputAvailable !== false"
             quaternary
             circle
             size="small"
@@ -228,7 +234,7 @@ function openPreview(jobId: string) {
             ><template #icon><NIcon :component="FolderOpenOutline" /></template
           ></NButton>
           <NButton
-            v-if="job.status === 'completed' && job.outputPath"
+            v-if="job.status === 'completed' && job.outputPath && job.outputAvailable !== false"
             secondary
             circle
             size="small"
