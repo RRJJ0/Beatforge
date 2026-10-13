@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { nextTick, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NCard, NEmpty, NIcon, NProgress, NTag, useMessage } from 'naive-ui'
 import {
   CloseOutline,
+  EyeOutline,
   FolderOpenOutline,
   OpenOutline,
   PlayOutline,
@@ -12,6 +13,7 @@ import {
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
 import { useDesktopStore } from '@/stores/desktop'
+import JobPreviewModal from '@/components/JobPreviewModal.vue'
 import type { BeatmapStatistics, GenerationJob } from '@/types'
 import {
   importDesktopJobOutput,
@@ -23,6 +25,8 @@ const jobsStore = useJobsStore()
 const desktopStore = useDesktopStore()
 const message = useMessage()
 const route = useRoute()
+const previewJobId = ref<string | null>(null)
+const previewVisible = ref(false)
 const statusType = {
   running: 'info',
   validating: 'info',
@@ -91,6 +95,11 @@ async function removeJob(job: GenerationJob) {
   )
   if (!confirmed) return
   await runAction(() => jobsStore.removeJob(job.id), 'Job and managed files deleted')
+}
+
+function openPreview(jobId: string) {
+  previewJobId.value = jobId
+  previewVisible.value = true
 }
 </script>
 
@@ -198,6 +207,16 @@ async function removeJob(job: GenerationJob) {
         <div class="job-actions">
           <NButton
             v-if="job.status === 'completed' && job.outputPath"
+            secondary
+            circle
+            size="small"
+            title="Preview validated result"
+            aria-label="Preview validated result"
+            @click="openPreview(job.id)"
+            ><template #icon><NIcon :component="EyeOutline" /></template
+          ></NButton>
+          <NButton
+            v-if="job.status === 'completed' && job.outputPath"
             quaternary
             circle
             size="small"
@@ -266,6 +285,7 @@ async function removeJob(job: GenerationJob) {
     </div>
     <NEmpty v-else description="No jobs in the queue" />
   </NCard>
+  <JobPreviewModal v-model:show="previewVisible" :job-id="previewJobId" />
 </template>
 
 <style scoped>

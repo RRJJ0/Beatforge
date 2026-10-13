@@ -82,6 +82,25 @@ export interface ValidationReport {
   completedAt: string
 }
 
+export interface DifficultyPreview {
+  id: string
+  name: string
+  objectCount: number
+  firstObjectMs?: number | null
+  lastObjectMs?: number | null
+  binWidthMs: number
+  density: number[]
+}
+
+export interface JobPreview {
+  jobId: string
+  audioPath?: string | null
+  audioUnavailableReason?: string | null
+  waveformAllowed: boolean
+  maxWaveformPoints: number
+  difficulties: DifficultyPreview[]
+}
+
 export interface GenerationJob {
   id: string
   title: string

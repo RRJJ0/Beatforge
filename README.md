@@ -659,7 +659,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 - [x] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
 - [x] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
 - [x] 7.5：加入桌面通知與背景任務完成／失敗提示。
-- [ ] 7.6：加入輕量音訊、時間軸與物件密度預覽。
+- [x] 7.6：加入輕量音訊、時間軸與物件密度預覽。
 - [ ] 7.7：完成繁體中文／英文介面與 accessibility 改善。
 - [ ] 7.8：執行產品整合、migration 與日常流程驗收。
 
@@ -718,12 +718,13 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.6 輕量結果預覽
 
-- 提供本機音訊播放、播放位置與基本波形／時間軸。
-- 由已驗證的 statistics 或 typed beatmap 資料產生物件密度摘要，支援多 difficulty 切換。
-- 預覽資料必須來自 validated artifact，並限制解析大小與 UI 點數，避免阻塞主介面。
-- 此功能只用於檢視與定位，不提供 hit object 編輯或取代 osu! Editor。
+- Jobs 與 History 的完成項目提供唯讀 Result preview；後端先沿用 artifact identity gate 確認 job 為 completed 且 validated artifact 仍存在，再解析 `.osu` 或 `.osz`，不接受 raw／validation-failed 輸出。
+- difficulty 名稱、物件數、首末物件時間與密度只取自 validated beatmap typed parser；`.osz` 最多 64 個 difficulty、單張 16 MiB，密度最多 240 bins，前端 waveform 最多 320 點。
+- 支援多 difficulty 切換、原始本機音訊播放、目前播放位置、點擊時間軸 seek，以及波形與物件密度疊圖；時間軸從 0 開始，因此開頭靜音與第一個物件的位置可直接比較。
+- 音訊只在請求該 job 預覽時動態加入 asset protocol 的單檔 allowlist；遺失、非 regular file、不支援格式或大於 128 MiB 時會停用音訊或只略過 waveform，密度預覽與既有匯入流程不受影響。
+- 預覽不保存、修正或覆寫 beatmap，也不提供 hit object 編輯；需要調整內容時仍使用 osu! Editor。
 
-驗收：播放、seek、difficulty 切換與密度顯示一致；遺失或不支援的音訊會安全降級且不影響匯入。
+驗收：Rust preview tests、前端 waveform tests、type-check、lint 與 production build 通過；播放、seek、difficulty 切換、密度對齊，以及遺失／不支援音訊時仍可匯入，需在 Windows 實際 job 上完成最後驗收。
 
 #### 7.7 雙語與 Accessibility
 

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type {
@@ -8,6 +8,7 @@ import type {
   EnvironmentDiagnostics,
   EnvironmentInstallEvent,
   GenerationJob,
+  JobPreview,
   ManagedPackage,
   ModelInfo,
   OsuInstallation,
@@ -219,6 +220,14 @@ export async function importDesktopJobOutput(jobId: string) {
 
 export async function importFailedDesktopJobOutput(jobId: string) {
   return invoke<OsuImportLaunch>('import_failed_job_output', { jobId })
+}
+
+export async function getDesktopJobPreview(jobId: string) {
+  const preview = await invoke<JobPreview>('get_job_preview', { jobId })
+  return {
+    ...preview,
+    audioUrl: preview.audioPath ? convertFileSrc(preview.audioPath) : null,
+  }
 }
 
 export function onDesktopJobEvent(handler: (job: GenerationJob) => void): Promise<UnlistenFn> {

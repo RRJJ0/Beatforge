@@ -15,12 +15,14 @@ import {
 } from 'naive-ui'
 import {
   FolderOpenOutline,
+  EyeOutline,
   OpenOutline,
   RefreshOutline,
   SearchOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
+import JobPreviewModal from '@/components/JobPreviewModal.vue'
 import type { GenerationJob, JobStatus } from '@/types'
 import {
   importDesktopJobOutput,
@@ -43,6 +45,8 @@ const model = ref('all')
 const dateRange = ref<HistoryDateRange>('all')
 const sort = ref<HistorySort>('newest')
 const page = ref(1)
+const previewJobId = ref<string | null>(null)
+const previewVisible = ref(false)
 
 const statusType = {
   running: 'info',
@@ -159,6 +163,11 @@ async function remove(job: GenerationJob) {
   if (!confirmed) return
   await runAction(() => jobsStore.removeJob(job.id), 'Job and managed files deleted')
 }
+
+function openPreview(jobId: string) {
+  previewJobId.value = jobId
+  previewVisible.value = true
+}
 </script>
 
 <template>
@@ -261,6 +270,17 @@ async function remove(job: GenerationJob) {
             <div class="row-actions">
               <NButton
                 v-if="job.status === 'completed' && job.outputPath && isDesktopRuntime()"
+                secondary
+                circle
+                size="small"
+                title="Preview validated result"
+                aria-label="Preview validated result"
+                @click="openPreview(job.id)"
+              >
+                <template #icon><NIcon :component="EyeOutline" /></template>
+              </NButton>
+              <NButton
+                v-if="job.status === 'completed' && job.outputPath && isDesktopRuntime()"
                 quaternary
                 circle
                 size="small"
@@ -326,6 +346,7 @@ async function remove(job: GenerationJob) {
       <NPagination v-model:page="page" :page-count="pageCount" />
     </div>
   </NCard>
+  <JobPreviewModal v-model:show="previewVisible" :job-id="previewJobId" />
 </template>
 
 <style scoped>

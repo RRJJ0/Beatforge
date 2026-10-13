@@ -21,6 +21,7 @@ mod mock_worker;
 mod models;
 mod osu_integration;
 mod packages;
+mod preview;
 mod protocol;
 mod request_adapter;
 mod runtime;
@@ -693,6 +694,29 @@ fn validated_job_artifact(app: &AppHandle, job_id: &str) -> Result<PathBuf, Stri
         job.output_path.as_deref(),
         job.validation_report.as_ref(),
     )
+}
+
+#[tauri::command]
+fn get_job_preview(app: AppHandle, job_id: String) -> Result<preview::JobPreview, String> {
+    let artifact = validated_job_artifact(&app, &job_id)?;
+    let (connection, _) = open_database(&app)?;
+    let job = jobs::get(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    let difficulties = preview::build_difficulties(&artifact)?;
+    let (audio_path, audio_unavailable_reason, waveform_allowed) =
+        preview::audio_details(Path::new(&job.audio_file));
+    if let Some(path) = audio_path.as_ref() {
+        app.asset_protocol_scope()
+            .allow_file(path)
+            .map_err(|error| format!("Could not authorize preview audio: {error}"))?;
+    }
+    Ok(preview::JobPreview {
+        job_id,
+        audio_path,
+        audio_unavailable_reason,
+        waveform_allowed,
+        max_waveform_points: 320,
+        difficulties,
+    })
 }
 
 fn selected_osu_executable(app: &AppHandle) -> Result<Option<PathBuf>, String> {
@@ -1816,6 +1840,7 @@ pub fn run() {
             retry_job,
             regenerate_job,
             delete_job,
+            get_job_preview,
             reveal_job_output,
             import_job_output,
             import_failed_job_output
