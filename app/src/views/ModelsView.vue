@@ -10,10 +10,12 @@ import {
 import type { ComputeBackend, ManagedPackage } from '@/types'
 import { usePackagesStore } from '@/stores/packages'
 import { useEnvironmentStore } from '@/stores/environment'
+import { useI18n } from '@/i18n'
 
 const message = useMessage()
 const packageStore = usePackagesStore()
 const environmentStore = useEnvironmentStore()
+const { t } = useI18n()
 const selectedBackend = ref<ComputeBackend>('cpu')
 const runtime = computed(() => packageStore.runtimes[0])
 const runtimeBusy = computed(() =>
@@ -185,7 +187,7 @@ onMounted(async () => {
       <div class="model-symbol"><NIcon :component="HardwareChipOutline" /></div>
       <div class="runtime-copy">
         <div class="model-name">
-          <h2>{{ runtime?.name ?? 'Python Runtime' }}</h2>
+          <h2>{{ runtime?.name ?? t('models.runtime') }}</h2>
           <NTag
             size="small"
             round
@@ -196,7 +198,7 @@ onMounted(async () => {
           <NTag v-if="runtime" size="small" round>v{{ runtime.targetVersion }}</NTag>
         </div>
         <p>
-          Private, application-managed Python environment. Your system Python is not modified.
+          {{ t('models.runtimeHelp') }}
         </p>
         <span v-if="runtime?.installPath" class="runtime-path">{{ runtime.installPath }}</span>
         <NProgress
@@ -214,7 +216,7 @@ onMounted(async () => {
           :disabled="runtimeBusy"
           @click="verifyRuntime"
         >
-          Verify
+          {{ t('common.verify') }}
         </NButton>
         <NButton
           v-if="runtime && runtime.status !== 'installed'"
@@ -224,7 +226,7 @@ onMounted(async () => {
           :disabled="runtimeBusy"
           @click="installRuntime"
         >
-          Install runtime
+          {{ t('models.installRuntime') }}
         </NButton>
         <NButton
           v-if="runtime && ['installed', 'downloaded', 'failed'].includes(runtime.status)"
@@ -233,7 +235,7 @@ onMounted(async () => {
           :disabled="runtimeBusy"
           @click="removeRuntime"
         >
-          Remove
+          {{ t('common.remove') }}
         </NButton>
       </div>
     </div>
@@ -245,17 +247,17 @@ onMounted(async () => {
     <div class="environment-header">
       <div>
         <div class="model-name">
-          <h2>AI environment</h2>
+          <h2>{{ t('models.environment') }}</h2>
           <NTag
             size="small"
             round
             :type="environmentStore.diagnostics?.ready ? 'success' : 'warning'"
           >
-            {{ environmentStore.diagnostics?.ready ? 'Ready' : 'Setup required' }}
+            {{ environmentStore.diagnostics?.ready ? t('common.ready') : t('models.setupRequired') }}
           </NTag>
         </div>
         <p class="environment-summary">
-          {{ environmentStore.diagnostics?.compatibilityReason ?? 'Checking GPU and runtime compatibility…' }}
+          {{ environmentStore.diagnostics?.compatibilityReason ?? t('models.compatibility') }}
         </p>
         <span v-if="environmentStore.diagnostics?.gpuName" class="runtime-path">
           {{ environmentStore.diagnostics.gpuName }} · Driver {{ environmentStore.diagnostics.driverVersion }}
@@ -274,7 +276,7 @@ onMounted(async () => {
           :disabled="runtime?.status !== 'installed' || environmentStore.installing"
           @click="installDependencies"
         >
-          {{ environmentStore.diagnostics?.ready ? 'Repair environment' : 'Install environment' }}
+          {{ environmentStore.diagnostics?.ready ? t('models.repairEnvironment') : t('models.installEnvironment') }}
         </NButton>
         <NButton
           secondary
@@ -282,7 +284,7 @@ onMounted(async () => {
           :disabled="environmentStore.installing"
           @click="environmentStore.refresh"
         >
-          Diagnose
+          {{ t('models.diagnose') }}
         </NButton>
         <NButton
           secondary
@@ -290,7 +292,7 @@ onMounted(async () => {
           :disabled="runtime?.status !== 'installed' || environmentStore.installing"
           @click="checkWorker"
         >
-          Worker health
+          {{ t('models.workerHealth') }}
         </NButton>
       </div>
     </div>
@@ -298,7 +300,7 @@ onMounted(async () => {
       <div v-for="item in diagnosticItems" :key="item.name" class="diagnostic-item">
         <span>{{ item.name }}</span>
         <NTag size="small" round :type="item.installed ? 'success' : 'default'">
-          {{ item.installed ? item.version ?? 'Installed' : 'Missing' }}
+          {{ item.installed ? item.version ?? t('models.installed') : t('models.missing') }}
         </NTag>
       </div>
     </div>
@@ -325,7 +327,7 @@ onMounted(async () => {
   <NCard class="storage-banner panel-card" :bordered="false">
     <div class="storage-icon"><NIcon :component="HardwareChipOutline" /></div>
     <div class="storage-copy">
-      <strong>Managed model storage</strong><span>Application data · verified packages only</span
+      <strong>{{ t('models.storage') }}</strong><span>{{ t('models.storageHelp') }}</span
       ><NProgress
         type="line"
         :percentage="modelStoragePercent"
@@ -336,7 +338,7 @@ onMounted(async () => {
     </div>
     <div class="storage-value">
       <strong>{{ formatBytes(installedModelBytes) }}</strong
-      ><span>of {{ formatBytes(totalModelBytes) }} installed</span>
+      ><span>{{ t('models.storageValue', { total: formatBytes(totalModelBytes) }) }}</span>
     </div>
   </NCard>
   <div class="model-list">
@@ -346,13 +348,13 @@ onMounted(async () => {
         <div class="model-info">
           <div class="model-name">
             <h2>{{ model.name }}</h2>
-            <NTag v-if="model.recommended" size="small" type="success" round>Recommended</NTag
+            <NTag v-if="model.recommended" size="small" type="success" round>{{ t('models.recommended') }}</NTag
             ><NTag size="small" round>v{{ model.targetVersion }}</NTag>
           </div>
           <p>{{ model.description }}</p>
           <div class="model-meta">
             <span>{{ formatBytes(model.sizeBytes) }}</span
-            ><span>osu!standard</span><span>Official V32 checkpoint</span>
+            ><span>osu!standard</span><span>{{ t('models.official') }}</span>
           </div>
           <div v-if="modelBusy(model)" class="download-progress">
             <NProgress type="line" :percentage="model.progress" :height="6" color="#ff66aa" /><span
@@ -362,7 +364,7 @@ onMounted(async () => {
         </div>
         <div class="model-action">
           <NTag v-if="model.status === 'installed'" type="success" :bordered="false"
-            ><template #icon><NIcon :component="CheckmarkCircleOutline" /></template>Installed</NTag
+            ><template #icon><NIcon :component="CheckmarkCircleOutline" /></template>{{ t('models.installed') }}</NTag
           >
           <NButton
             v-if="model.status !== 'installed'"
@@ -372,7 +374,7 @@ onMounted(async () => {
             :disabled="modelBusy(model) || runtime?.status !== 'installed'"
             @click="installModel(model)"
             ><template #icon><NIcon :component="CloudDownloadOutline" /></template>
-            {{ model.status === 'update_available' ? 'Update' : model.status === 'failed' ? 'Repair' : 'Install' }}
+            {{ model.status === 'update_available' ? t('models.update') : model.status === 'failed' ? t('models.repair') : t('common.install') }}
           </NButton
           >
           <NButton
@@ -380,11 +382,12 @@ onMounted(async () => {
             secondary
             :disabled="modelBusy(model)"
             @click="verifyModel(model)"
-          >Verify</NButton>
+          >{{ t('common.verify') }}</NButton>
           <NButton
             v-if="['installed', 'downloaded', 'failed', 'update_available'].includes(model.status)"
             quaternary
             circle
+            :aria-label="t('common.remove')"
             :disabled="modelBusy(model)"
             @click="removeModel(model)"
             ><template #icon><NIcon :component="TrashOutline" /></template

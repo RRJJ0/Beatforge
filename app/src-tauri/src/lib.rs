@@ -83,7 +83,7 @@ struct OsuInstallation {
     executable: Option<String>,
 }
 
-const SETTINGS_SCHEMA_VERSION: u16 = 2;
+const SETTINGS_SCHEMA_VERSION: u16 = 3;
 const MAX_SETTINGS_IMPORT_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,6 +102,8 @@ pub(crate) struct AppSettings {
     check_updates: bool,
     #[serde(default = "default_true")]
     desktop_notifications: bool,
+    #[serde(default = "default_locale")]
+    locale: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -125,6 +127,7 @@ struct PartialAppSettings {
     repair_generated_output: Option<bool>,
     check_updates: Option<bool>,
     desktop_notifications: Option<bool>,
+    locale: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,6 +154,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_locale() -> String {
+    "en".into()
+}
+
 impl AppSettings {
     fn default_for(paths: &AppPaths) -> Self {
         Self {
@@ -165,6 +172,7 @@ impl AppSettings {
             repair_generated_output: true,
             check_updates: true,
             desktop_notifications: true,
+            locale: default_locale(),
         }
     }
 }
@@ -190,6 +198,9 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
     }
     if !(1..=4).contains(&settings.workers) {
         return Err("Background workers must be between 1 and 4".into());
+    }
+    if !matches!(settings.locale.as_str(), "en" | "zh-TW") {
+        return Err("Unsupported interface language setting".into());
     }
     Ok(())
 }
@@ -400,6 +411,7 @@ fn preview_settings_json(
         desktop_notifications,
         partial.desktop_notifications
     );
+    portable_setting!("locale", locale, partial.locale);
     result = migrate_legacy_settings(result);
     validate_settings(&result)
         .map_err(|error| format!("Imported settings would be invalid: {error}"))?;
@@ -432,6 +444,7 @@ mod settings_tests {
             repair_generated_output: true,
             check_updates: true,
             desktop_notifications: true,
+            locale: "en".into(),
         }
     }
 
@@ -445,6 +458,7 @@ mod settings_tests {
         assert!(migrated);
         assert!(settings.repair_generated_output);
         assert!(settings.desktop_notifications);
+        assert_eq!(settings.locale, "en");
         assert_eq!(settings.precision, "bf16");
         let exported = settings_json(&settings).unwrap();
         assert!(exported.contains(&format!(r#""schemaVersion": {SETTINGS_SCHEMA_VERSION}"#)));
@@ -903,6 +917,7 @@ fn reset_settings(app: AppHandle, field: Option<String>) -> Result<AppSettings, 
         Some("desktopNotifications") => {
             settings.desktop_notifications = defaults.desktop_notifications
         }
+        Some("locale") => settings.locale = defaults.locale,
         Some(_) => return Err("Unknown settings field".into()),
     }
     persist_settings(&connection, &settings)?;

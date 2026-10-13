@@ -218,3 +218,35 @@
 .app-shell.is-dark {
   background: #111622;
 }
+
+:where(button, a, input, textarea, [tabindex], .n-base-selection):focus-visible {
+  outline: 3px solid #ff66aa !important;
+  outline-offset: 3px;
+}
+
+.n-form-item-feedback-wrapper {
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-sidebar {
+    width: 196px !important;
+    min-width: 196px !important;
+    max-width: 196px !important;
+  }
+  .topbar,
+  .page-content {
+    padding-inline: 20px;
+  }
+}

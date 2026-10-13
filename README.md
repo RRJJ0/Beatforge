@@ -660,7 +660,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 - [x] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
 - [x] 7.5：加入桌面通知與背景任務完成／失敗提示。
 - [x] 7.6：加入輕量音訊、時間軸與物件密度預覽。
-- [ ] 7.7：完成繁體中文／英文介面與 accessibility 改善。
+- [x] 7.7：完成繁體中文／英文介面與 accessibility 改善。
 - [ ] 7.8：執行產品整合、migration 與日常流程驗收。
 
 #### 7.1 歷史檢視、搜尋與篩選
@@ -728,12 +728,15 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.7 雙語與 Accessibility
 
-- 將使用者可見字串集中管理，完成繁體中文與英文切換及保存。
-- 檢查鍵盤導覽、focus 順序、focus 樣式、dialog focus trap、表單 label 與錯誤提示。
-- 改善文字／狀態對比、縮放、長字串、減少動態效果與不只依賴顏色傳達狀態。
-- 為主要流程建立 accessibility checklist，修正自動檢查與人工鍵盤測試發現的問題。
+- 新增 reactive `en`／`zh-TW` 字串目錄，儲存語言設定後，主導覽、頁面標題、生成、任務、歷史、結果預覽、模型及設定主要操作會一起切換；未儲存的選擇不會影響其他頁面。技術名稱、檔案路徑、worker/backend 回傳內容維持原文。
+- Settings 文件升級至 schema v3 並保存 `locale`；舊版或 legacy 設定自動補入 `en`，匯入／匯出、單欄 reset 與全域 reset 都包含介面語言。瀏覽器 fallback 另以 localStorage 保存，啟動時同步 `<html lang>`。
+- App shell 新增 skip link 與具 landmark 的 main target；icon-only action、switch、預覽 slider 補上可讀 label。時間軸支援滑鼠、方向鍵每次 5 秒、Home 與 End，並提供 `aria-valuemin/max/now`。
+- 全域 `:focus-visible` 提供高對比外框；原生／Naive modal 沿用 focus trap 與 Escape close，表單錯誤保留文字 feedback，不只依賴顏色。狀態標籤同時顯示文字。
+- 支援 `prefers-reduced-motion`，窄視窗／高縮放縮減 sidebar 與內容邊距；長路徑及結果文字沿用截斷或換行規則。
 
-驗收：不使用滑鼠即可完成設定、建立任務、查看結果與匯入；兩種語言下主要畫面無截斷或未翻譯字串。
+Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成選檔、表單、生成、結果預覽、匯入與設定儲存；dialog 開啟後 focus 留在 dialog，Escape 可關閉；所有 icon-only 主要動作有 accessible name；200% 縮放下主要操作不被裁切；中英文切換後 title、label 與提示同步更新。
+
+驗收：settings migration、i18n／既有前端單元測試、type-check、lint、production build 與 Tauri no-bundle build 通過；Windows Narrator、鍵盤 focus trap、200% 縮放及兩種語言長字串需實機完成最後驗收。
 
 #### 7.8 產品整合與日常流程驗收
 

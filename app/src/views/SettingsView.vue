@@ -49,6 +49,7 @@ import {
   type DesktopNotificationPermission,
 } from '@/services/notifications'
 import type {
+  AppLocale,
   AppSettings,
   SettingsImportPreview,
   StorageCategory,
@@ -56,9 +57,11 @@ import type {
   StorageCleanupResult,
   StorageUsageReport,
 } from '@/types'
+import { useI18n } from '@/i18n'
 
 const message = useMessage()
 const desktopStore = useDesktopStore()
+const { locale, setLocale, t } = useI18n()
 const savedSettings = JSON.parse(localStorage.getItem('beatforge:settings') ?? '{}')
 const outputPath = ref(savedSettings.outputPath ?? '')
 const tempPath = ref(savedSettings.tempPath ?? '')
@@ -73,6 +76,7 @@ const keepIntermediate = ref(savedSettings.keepIntermediate ?? false)
 const repairGeneratedOutput = ref(savedSettings.repairGeneratedOutput ?? true)
 const updates = ref(savedSettings.checkUpdates ?? true)
 const desktopNotifications = ref(savedSettings.desktopNotifications ?? true)
+const selectedLocale = ref<AppLocale>(savedSettings.locale === 'zh-TW' ? 'zh-TW' : locale.value)
 const notificationPermission = ref<DesktopNotificationPermission>('unavailable')
 const checking = ref(false)
 const saving = ref(false)
@@ -110,6 +114,8 @@ function applySettings(settings: AppSettings) {
   repairGeneratedOutput.value = settings.repairGeneratedOutput
   updates.value = settings.checkUpdates
   desktopNotifications.value = settings.desktopNotifications
+  selectedLocale.value = settings.locale
+  setLocale(settings.locale)
 }
 
 function currentSettings(): AppSettings {
@@ -125,6 +131,7 @@ function currentSettings(): AppSettings {
     repairGeneratedOutput: repairGeneratedOutput.value,
     checkUpdates: updates.value,
     desktopNotifications: desktopNotifications.value,
+    locale: selectedLocale.value,
   }
 }
 
@@ -167,12 +174,17 @@ async function saveSettings() {
   try {
     if (isDesktopRuntime()) await saveDesktopSettings(settings)
     else localStorage.setItem('beatforge:settings', JSON.stringify(settings))
+    setLocale(settings.locale)
     message.success('Settings saved locally.')
   } catch (reason) {
     message.error(`Could not save settings: ${String(reason)}`)
   } finally {
     saving.value = false
   }
+}
+
+function changeLocale(value: AppLocale) {
+  selectedLocale.value = value
 }
 
 async function exportSettingsFile() {
@@ -342,37 +354,37 @@ async function performStorageCleanup() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Output & storage</h2>
-            <p class="section-copy">Choose where beatmaps and temporary files are written.</p>
+            <h2 class="section-title">{{ t('settings.output') }}</h2>
+            <p class="section-copy">{{ t('settings.outputHelp') }}</p>
           </div>
         </div>
         <NForm label-placement="top">
-          <NFormItem label="Beatmap output folder">
+          <NFormItem :label="t('settings.outputFolder')">
             <div class="path-field">
               <NInput v-model:value="outputPath" class="mono" /><NButton
                 secondary
                 @click="browse('output')"
-                ><template #icon><NIcon :component="FolderOpenOutline" /></template>Browse</NButton
+                ><template #icon><NIcon :component="FolderOpenOutline" /></template>{{ t('common.browse') }}</NButton
               >
             </div>
           </NFormItem>
-          <NFormItem label="Temporary files folder">
+          <NFormItem :label="t('settings.tempFolder')">
             <div class="path-field">
               <NInput v-model:value="tempPath" class="mono" /><NButton
                 secondary
                 @click="browse('temp')"
-                ><template #icon><NIcon :component="FolderOpenOutline" /></template>Browse</NButton
+                ><template #icon><NIcon :component="FolderOpenOutline" /></template>{{ t('common.browse') }}</NButton
               >
             </div>
           </NFormItem>
-          <NFormItem label="osu! installation folder">
+          <NFormItem :label="t('settings.osuFolder')">
             <div class="path-field">
               <NInput
                 v-model:value="osuPath"
                 class="mono"
-                placeholder="Automatically detected or choose manually"
+                :placeholder="t('settings.osuPlaceholder')"
               /><NButton secondary @click="browse('osu')"
-                ><template #icon><NIcon :component="FolderOpenOutline" /></template>Browse</NButton
+                ><template #icon><NIcon :component="FolderOpenOutline" /></template>{{ t('common.browse') }}</NButton
               >
             </div>
           </NFormItem>
@@ -393,17 +405,17 @@ async function performStorageCleanup() {
           </div>
           <div class="setting-row">
             <div>
-              <strong>Import into osu! automatically</strong
-              ><small>Open validated output after generation finishes.</small>
+              <strong>{{ t('settings.autoImport') }}</strong
+              ><small>{{ t('settings.autoImportHelp') }}</small>
             </div>
-            <NSwitch v-model:value="autoImport" />
+            <NSwitch v-model:value="autoImport" :aria-label="t('settings.autoImport')" />
           </div>
           <div class="setting-row">
             <div>
-              <strong>Keep intermediate files</strong
-              ><small>Preserve timing and inference data for debugging.</small>
+              <strong>{{ t('settings.keep') }}</strong
+              ><small>{{ t('settings.keepHelp') }}</small>
             </div>
-            <NSwitch v-model:value="keepIntermediate" />
+            <NSwitch v-model:value="keepIntermediate" :aria-label="t('settings.keep')" />
           </div>
         </NForm>
       </NCard>
@@ -411,22 +423,22 @@ async function performStorageCleanup() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Compute</h2>
-            <p class="section-copy">Mapperatorinator inference options for this machine.</p>
+            <h2 class="section-title">{{ t('settings.compute') }}</h2>
+            <p class="section-copy">{{ t('settings.computeHelp') }}</p>
           </div>
           <NTag :type="gpu?.available ? 'success' : 'warning'" round size="small">{{
-            gpu?.available ? 'CUDA available' : 'CUDA unavailable'
+            gpu?.available ? t('settings.cudaAvailable') : t('settings.cudaUnavailable')
           }}</NTag>
         </div>
         <NForm label-placement="top">
-          <NFormItem label="Compute device"
+          <NFormItem :label="t('settings.device')"
             ><NRadioGroup v-model:value="device"
               ><NRadioButton value="cuda">NVIDIA CUDA</NRadioButton
               ><NRadioButton value="cpu">CPU</NRadioButton></NRadioGroup
             ></NFormItem
           >
           <div class="two-column">
-            <NFormItem label="Precision"
+            <NFormItem :label="t('settings.precision')"
               ><NSelect
                 v-model:value="precision"
                 :options="[
@@ -434,7 +446,7 @@ async function performStorageCleanup() {
                   { label: 'FP32 · Compatible', value: 'fp32' },
                 ]"
             /></NFormItem>
-            <NFormItem label="Background workers"
+            <NFormItem :label="t('settings.workers')"
               ><NInputNumber v-model:value="workers" :min="1" :max="4"
             /></NFormItem>
           </div>
@@ -444,13 +456,13 @@ async function performStorageCleanup() {
           >
           <div class="setting-row">
             <div>
-              <strong>Repair unsafe generated gameplay data</strong
+              <strong>{{ t('settings.repair') }}</strong
               ><small
                 >Resolve generated event times, discard time regressions, and repair invalid slider
                 values. Disable to preserve Mapperatorinator output unchanged.</small
               >
             </div>
-            <NSwitch v-model:value="repairGeneratedOutput" />
+            <NSwitch v-model:value="repairGeneratedOutput" :aria-label="t('settings.repair')" />
           </div>
           <NAlert v-if="!repairGeneratedOutput" type="warning" :show-icon="false">
             Raw output can fail validation or contain unplayable objects. Failed output can still be
@@ -462,13 +474,13 @@ async function performStorageCleanup() {
       <NCard class="panel-card storage-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Storage management</h2>
+            <h2 class="section-title">{{ t('settings.storage') }}</h2>
             <p class="section-copy">
               Managed files use
               <strong>{{ formatBytes(storageUsage?.totalBytes ?? 0) }}</strong> in total.
             </p>
           </div>
-          <NButton quaternary circle :loading="storageLoading" @click="refreshStorage(false)">
+          <NButton quaternary circle :aria-label="t('common.refresh')" :loading="storageLoading" @click="refreshStorage(false)">
             <template #icon><NIcon :component="RefreshOutline" /></template>
           </NButton>
         </div>
@@ -488,7 +500,7 @@ async function performStorageCleanup() {
             >
               <span class="storage-name">
                 {{ storageLabels[item.category] }}
-                <NTag v-if="item.protected" size="tiny" type="warning" round>Result</NTag>
+                <NTag v-if="item.protected" size="tiny" type="warning" round>{{ t('common.result') }}</NTag>
               </span>
             </NCheckbox>
             <strong>{{ formatBytes(item.bytes) }}</strong>
@@ -527,7 +539,7 @@ async function performStorageCleanup() {
             @click="reviewStorageCleanup"
           >
             <template #icon><NIcon :component="TrashOutline" /></template>
-            Review cleanup
+            {{ t('settings.reviewCleanup') }}
           </NButton>
         </div>
       </NCard>
@@ -537,8 +549,8 @@ async function performStorageCleanup() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Environment</h2>
-            <p class="section-copy">Local backend readiness.</p>
+            <h2 class="section-title">{{ t('settings.environment') }}</h2>
+            <p class="section-copy">{{ t('settings.environmentHelp') }}</p>
           </div>
         </div>
         <div class="health-list">
@@ -580,22 +592,37 @@ async function performStorageCleanup() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Application</h2>
-            <p class="section-copy">Update and maintenance preferences.</p>
+            <h2 class="section-title">{{ t('settings.application') }}</h2>
+            <p class="section-copy">{{ t('settings.applicationHelp') }}</p>
           </div>
         </div>
         <div class="setting-row">
           <div>
-            <strong>Check for updates</strong><small>Look for new app and model releases.</small>
+            <strong>{{ t('settings.language') }}</strong><small>{{ t('settings.languageHelp') }}</small>
           </div>
-          <NSwitch v-model:value="updates" />
+          <NSelect
+            class="language-select"
+            :value="selectedLocale"
+            :options="[
+              { label: t('settings.english'), value: 'en' },
+              { label: t('settings.chinese'), value: 'zh-TW' },
+            ]"
+            :aria-label="t('settings.language')"
+            @update:value="changeLocale"
+          />
         </div>
         <div class="setting-row">
           <div>
-            <strong>Background job notifications</strong
-            ><small>Show a Windows notification when a background job finishes or fails.</small>
+            <strong>{{ t('settings.updates') }}</strong><small>{{ t('settings.updatesHelp') }}</small>
           </div>
-          <NSwitch v-model:value="desktopNotifications" />
+          <NSwitch v-model:value="updates" :aria-label="t('settings.updates')" />
+        </div>
+        <div class="setting-row">
+          <div>
+            <strong>{{ t('settings.notifications') }}</strong
+            ><small>{{ t('settings.notificationsHelp') }}</small>
+          </div>
+          <NSwitch v-model:value="desktopNotifications" :aria-label="t('settings.notifications')" />
         </div>
         <div v-if="desktopNotifications" class="notification-permission">
           <span>
@@ -623,17 +650,17 @@ async function performStorageCleanup() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Backup & reset</h2>
-            <p class="section-copy">Versioned JSON settings without model or song data.</p>
+            <h2 class="section-title">{{ t('settings.backup') }}</h2>
+            <p class="section-copy">{{ t('settings.backupHelp') }}</p>
           </div>
-          <NTag round size="small">Schema v2</NTag>
+          <NTag round size="small">Schema v3</NTag>
         </div>
         <div class="transfer-actions">
           <NButton secondary :loading="transferring" @click="exportSettingsFile">
-            Export settings
+            {{ t('settings.export') }}
           </NButton>
           <NButton secondary :loading="transferring" @click="chooseSettingsImport">
-            Import settings
+            {{ t('settings.import') }}
           </NButton>
         </div>
         <div class="reset-control">
@@ -651,9 +678,10 @@ async function performStorageCleanup() {
               { label: 'Generated output repair', value: 'repairGeneratedOutput' },
               { label: 'Update checks', value: 'checkUpdates' },
               { label: 'Background notifications', value: 'desktopNotifications' },
+              { label: 'Interface language', value: 'locale' },
             ]"
           />
-          <NButton :loading="transferring" @click="restoreDefaults(false)">Reset selected</NButton>
+          <NButton :loading="transferring" @click="restoreDefaults(false)">{{ t('settings.resetSelected') }}</NButton>
         </div>
         <NButton
           block
@@ -662,11 +690,11 @@ async function performStorageCleanup() {
           :loading="transferring"
           @click="restoreDefaults(true)"
         >
-          Restore all defaults
+          {{ t('settings.resetAll') }}
         </NButton>
       </NCard>
       <NButton type="primary" size="large" block :loading="saving" @click="saveSettings"
-        ><template #icon><NIcon :component="SaveOutline" /></template>Save settings</NButton
+        ><template #icon><NIcon :component="SaveOutline" /></template>{{ t('common.save') }}</NButton
       >
     </aside>
   </div>
@@ -675,7 +703,7 @@ async function performStorageCleanup() {
     <NCard class="import-preview" :bordered="false" role="dialog" aria-modal="true">
       <div class="card-heading">
         <div>
-          <h2 class="section-title">Review settings import</h2>
+          <h2 class="section-title">{{ t('settings.reviewImport') }}</h2>
           <p class="section-copy">
             {{
               importPreview?.schemaVersion === 0
@@ -705,7 +733,7 @@ async function performStorageCleanup() {
         </div>
       </div>
       <div class="modal-actions">
-        <NButton @click="importPreview = null">Cancel</NButton>
+        <NButton @click="importPreview = null">{{ t('common.cancel') }}</NButton>
         <NButton type="primary" :loading="transferring" @click="applySettingsImport">
           Apply imported settings
         </NButton>
@@ -717,7 +745,7 @@ async function performStorageCleanup() {
     <NCard class="cleanup-preview" :bordered="false" role="dialog" aria-modal="true">
       <div class="card-heading">
         <div>
-          <h2 class="section-title">Review storage cleanup</h2>
+          <h2 class="section-title">{{ t('settings.reviewCleanup') }}</h2>
           <p class="section-copy">
             {{ cleanupPreview?.totalFiles ?? 0 }} files and
             {{ cleanupPreview?.totalDirectories ?? 0 }} directories ·
@@ -745,14 +773,14 @@ async function performStorageCleanup() {
         automatically.
       </NCheckbox>
       <div class="modal-actions">
-        <NButton @click="cleanupPreview = null">Cancel</NButton>
+        <NButton @click="cleanupPreview = null">{{ t('common.cancel') }}</NButton>
         <NButton
           type="error"
           :loading="storageLoading"
           :disabled="cleanupPreview?.protectedSelected && !allowProtectedCleanup"
           @click="performStorageCleanup"
         >
-          Clean selected files
+          {{ t('settings.clean') }}
         </NButton>
       </div>
     </NCard>
@@ -845,6 +873,9 @@ async function performStorageCleanup() {
   margin-bottom: 14px;
   color: #858da0;
   font-size: 10px;
+}
+.language-select {
+  width: 150px;
 }
 .notification-permission > span {
   display: inline-flex;

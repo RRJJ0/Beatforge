@@ -23,6 +23,7 @@ import {
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
 import JobPreviewModal from '@/components/JobPreviewModal.vue'
+import { useI18n } from '@/i18n'
 import type { GenerationJob, JobStatus } from '@/types'
 import {
   importDesktopJobOutput,
@@ -47,6 +48,7 @@ const sort = ref<HistorySort>('newest')
 const page = ref(1)
 const previewJobId = ref<string | null>(null)
 const previewVisible = ref(false)
+const { t } = useI18n()
 
 const statusType = {
   running: 'info',
@@ -59,20 +61,16 @@ const statusType = {
   interrupted: 'warning',
 } as const
 
-const statusOptions: Array<{ label: string; value: 'all' | JobStatus }> = [
-  { label: 'All statuses', value: 'all' },
-  { label: 'Completed', value: 'completed' },
-  { label: 'Validation failed', value: 'validation_failed' },
-  { label: 'Failed', value: 'failed' },
-  { label: 'Cancelled', value: 'cancelled' },
-  { label: 'Interrupted', value: 'interrupted' },
-  { label: 'Running', value: 'running' },
-  { label: 'Validating', value: 'validating' },
-  { label: 'Queued', value: 'queued' },
-]
+const statusOptions = computed<Array<{ label: string; value: 'all' | JobStatus }>>(() => [
+  { label: t('history.allStatuses'), value: 'all' },
+  ...(['completed', 'validation_failed', 'failed', 'cancelled', 'interrupted', 'running', 'validating', 'queued'] as JobStatus[]).map((value) => ({
+    label: t(`status.${value}` as 'status.completed'),
+    value,
+  })),
+])
 
 const modelOptions = computed(() => [
-  { label: 'All models', value: 'all' },
+  { label: t('history.allModels'), value: 'all' },
   ...[...new Set(jobsStore.jobs.map((job) => job.model))]
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right))
@@ -173,27 +171,27 @@ function openPreview(jobId: string) {
 <template>
   <div class="stat-grid">
     <div class="stat-card">
-      <div class="stat-label">Stored jobs</div>
+      <div class="stat-label">{{ t('history.stored') }}</div>
       <div class="stat-value">{{ jobsStore.jobs.length }}</div>
-      <div class="stat-note">Persisted local records</div>
+      <div class="stat-note">{{ t('history.storedHelp') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Completed</div>
+      <div class="stat-label">{{ t('history.completed') }}</div>
       <div class="stat-value">{{ completedCount }}</div>
-      <div class="stat-note">Validated deliverables</div>
+      <div class="stat-note">{{ t('history.deliverables') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Average target</div>
+      <div class="stat-label">{{ t('history.average') }}</div>
       <div class="stat-value">{{ averageDifficulty }}</div>
-      <div class="stat-note">{{ issueCount }} stopped or invalid</div>
+      <div class="stat-note">{{ t('history.stopped', { count: issueCount }) }}</div>
     </div>
   </div>
 
   <NCard class="panel-card" :bordered="false">
     <div class="history-heading">
       <div>
-        <h2 class="section-title">Job history</h2>
-        <p class="section-copy">Generation records loaded from the local SQLite database.</p>
+        <h2 class="section-title">{{ t('history.title') }}</h2>
+        <p class="section-copy">{{ t('history.help') }}</p>
       </div>
       <NButton
         secondary
@@ -209,7 +207,7 @@ function openPreview(jobId: string) {
     <div class="history-toolbar">
       <NInput
         v-model:value="search"
-        placeholder="Search title, artist, job ID, model, or audio"
+        :placeholder="t('history.search')"
         clearable
       >
         <template #prefix><NIcon :component="SearchOutline" /></template>
@@ -219,18 +217,18 @@ function openPreview(jobId: string) {
       <NSelect
         v-model:value="dateRange"
         :options="[
-          { label: 'All dates', value: 'all' },
-          { label: 'Today', value: 'today' },
-          { label: 'Last 7 days', value: 'seven_days' },
-          { label: 'Last 30 days', value: 'thirty_days' },
+          { label: t('history.allDates'), value: 'all' },
+          { label: t('history.today'), value: 'today' },
+          { label: t('history.sevenDays'), value: 'seven_days' },
+          { label: t('history.thirtyDays'), value: 'thirty_days' },
         ]"
       />
       <NSelect
         v-model:value="sort"
         :options="[
-          { label: 'Newest first', value: 'newest' },
-          { label: 'Oldest first', value: 'oldest' },
-          { label: 'Title A–Z', value: 'title' },
+          { label: t('history.newest'), value: 'newest' },
+          { label: t('history.oldest'), value: 'oldest' },
+          { label: t('history.titleSort'), value: 'title' },
         ]"
       />
     </div>
@@ -243,8 +241,8 @@ function openPreview(jobId: string) {
       <div v-if="visibleJobs.length" class="history-table-wrap">
         <div class="history-table">
           <div class="table-row table-head">
-            <span>Beatmap</span><span>Status</span><span>Difficulty</span><span>Model</span
-            ><span>Created</span><span></span>
+            <span>{{ t('history.beatmap') }}</span><span>{{ t('history.status') }}</span><span>{{ t('history.difficulty') }}</span><span>{{ t('history.model') }}</span
+            ><span>{{ t('history.created') }}</span><span></span>
           </div>
           <div v-for="job in visibleJobs" :key="job.id" class="table-row">
             <div class="map-cell">
@@ -259,7 +257,7 @@ function openPreview(jobId: string) {
             </div>
             <div>
               <NTag size="small" round :type="statusType[job.status]">
-                {{ job.status.replaceAll('_', ' ') }}
+                {{ t(`status.${job.status}` as 'status.completed') }}
               </NTag>
             </div>
             <div>
@@ -273,8 +271,8 @@ function openPreview(jobId: string) {
                 secondary
                 circle
                 size="small"
-                title="Preview validated result"
-                aria-label="Preview validated result"
+                :title="t('jobs.preview')"
+                :aria-label="t('jobs.preview')"
                 @click="openPreview(job.id)"
               >
                 <template #icon><NIcon :component="EyeOutline" /></template>
@@ -284,8 +282,8 @@ function openPreview(jobId: string) {
                 quaternary
                 circle
                 size="small"
-                title="Show validated output"
-                aria-label="Show validated output"
+                :title="t('jobs.show')"
+                :aria-label="t('jobs.show')"
                 @click="runAction(() => revealDesktopJobOutput(job.id))"
               >
                 <template #icon><NIcon :component="FolderOpenOutline" /></template>
@@ -295,8 +293,8 @@ function openPreview(jobId: string) {
                 secondary
                 circle
                 size="small"
-                title="Import into osu!"
-                aria-label="Import into osu!"
+                :title="t('jobs.import')"
+                :aria-label="t('jobs.import')"
                 @click="runAction(() => importDesktopJobOutput(job.id), 'Import opened')"
               >
                 <template #icon><NIcon :component="OpenOutline" /></template>
@@ -308,8 +306,8 @@ function openPreview(jobId: string) {
                 quaternary
                 circle
                 size="small"
-                title="Regenerate as a new job"
-                aria-label="Regenerate as a new job"
+                :title="t('history.regenerate')"
+                :aria-label="t('history.regenerate')"
                 @click="regenerate(job)"
               >
                 <template #icon><NIcon :component="RefreshOutline" /></template>
@@ -320,8 +318,8 @@ function openPreview(jobId: string) {
                 circle
                 size="small"
                 type="error"
-                title="Delete job and managed files"
-                aria-label="Delete job and managed files"
+                :title="t('history.delete')"
+                :aria-label="t('history.delete')"
                 @click="remove(job)"
               >
                 <template #icon><NIcon :component="TrashOutline" /></template>
@@ -333,10 +331,10 @@ function openPreview(jobId: string) {
       <NEmpty
         v-else
         class="empty-results"
-        :description="hasFilters ? 'No jobs match the selected filters' : 'No job history yet'"
+        :description="hasFilters ? t('history.noMatch') : t('history.empty')"
       >
         <template v-if="hasFilters" #extra>
-          <NButton size="small" @click="clearFilters">Clear filters</NButton>
+          <NButton size="small" @click="clearFilters">{{ t('history.clear') }}</NButton>
         </template>
       </NEmpty>
     </NSpin>

@@ -38,12 +38,14 @@ import {
   type JobNotice,
 } from '@/utils/jobNotifications'
 import type { GenerationJob, JobStatus } from '@/types'
+import { useI18n } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const desktopStore = useDesktopStore()
 const jobsStore = useJobsStore()
+const { t, setLocale } = useI18n()
 const jobNotice = ref<JobNotice | null>(null)
 const notificationTracker = new TerminalJobTracker()
 let unsubscribeJobEvents: (() => void) | undefined
@@ -82,7 +84,12 @@ onMounted(async () => {
   unsubscribeNotificationActions = await onDesktopNotificationAction((jobId) => {
     void openNotifiedJob(jobId)
   })
-  await Promise.allSettled([desktopStore.initialize(), jobsStore.initialize()])
+  const [settings] = await Promise.allSettled([
+    loadDesktopSettings(),
+    desktopStore.initialize(),
+    jobsStore.initialize(),
+  ])
+  if (settings.status === 'fulfilled') setLocale(settings.value.locale)
 })
 
 onBeforeUnmount(() => {
@@ -91,13 +98,13 @@ onBeforeUnmount(() => {
 })
 const icon = (component: typeof SparklesOutline) => () =>
   h(NIcon, null, { default: () => h(component) })
-const menuOptions: MenuOption[] = [
-  { label: 'Generate', key: '/', icon: icon(SparklesOutline) },
-  { label: 'Jobs', key: '/jobs', icon: icon(OptionsOutline) },
-  { label: 'History', key: '/history', icon: icon(TimeOutline) },
-  { label: 'Models', key: '/models', icon: icon(AlbumsOutline) },
-  { label: 'Settings', key: '/settings', icon: icon(SettingsOutline) },
-]
+const menuOptions = computed<MenuOption[]>(() => [
+  { label: t('nav.generate'), key: '/', icon: icon(SparklesOutline) },
+  { label: t('nav.jobs'), key: '/jobs', icon: icon(OptionsOutline) },
+  { label: t('nav.history'), key: '/history', icon: icon(TimeOutline) },
+  { label: t('nav.models'), key: '/models', icon: icon(AlbumsOutline) },
+  { label: t('nav.settings'), key: '/settings', icon: icon(SettingsOutline) },
+])
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#ff66aa',
@@ -113,9 +120,9 @@ const themeOverrides: GlobalThemeOverrides = {
   Menu: { itemBorderRadius: '10px' },
 }
 const currentPath = computed(() => route.path)
-const pageTitle = computed(() => String(route.meta.title ?? 'Generate'))
+const pageTitle = computed(() => t(`nav.${String(route.name ?? 'generate')}` as 'nav.generate'))
 const pageDescription = computed(() =>
-  String(route.meta.description ?? 'Create a playable beatmap from your music.'),
+  t(`page.${String(route.name ?? 'generate')}.description` as 'page.generate.description'),
 )
 </script>
 
@@ -123,11 +130,12 @@ const pageDescription = computed(() =>
   <NConfigProvider :theme="appStore.isDark ? darkTheme : null" :theme-overrides="themeOverrides">
     <NGlobalStyle />
     <NMessageProvider placement="top-right">
+      <a class="skip-link" href="#main-content">{{ t('app.skip') }}</a>
       <NLayout class="app-shell" :class="{ 'is-dark': appStore.isDark }" has-sider>
         <NLayoutSider bordered class="app-sidebar" :width="236" :native-scrollbar="false">
           <div class="brand">
             <div class="brand-mark"><span>●</span></div>
-            <div><strong>BEATFORGE</strong><small>AI beatmap studio</small></div>
+            <div><strong>BEATFORGE</strong><small>{{ t('app.studio') }}</small></div>
           </div>
           <NMenu
             :value="currentPath"
@@ -138,13 +146,13 @@ const pageDescription = computed(() =>
           <div class="sidebar-footer">
             <div class="runtime-card">
               <div class="runtime-heading">
-                <NIcon :component="HardwareChipOutline" /><span>Compute engine</span>
+                <NIcon :component="HardwareChipOutline" /><span>{{ t('app.compute') }}</span>
               </div>
               <strong>{{ desktopStore.engineLabel }}</strong
               ><small>{{ desktopStore.engineDetail }}</small>
               <div class="runtime-meter"><span /></div>
             </div>
-            <div class="version-row"><span>Local workspace</span><span>v0.1.0</span></div>
+            <div class="version-row"><span>{{ t('app.workspace') }}</span><span>v0.1.0</span></div>
           </div>
         </NLayoutSider>
 
@@ -156,11 +164,11 @@ const pageDescription = computed(() =>
               <p>{{ pageDescription }}</p>
             </div>
             <div class="topbar-actions">
-              <NTag round size="small" type="success">Engine ready</NTag>
+              <NTag round size="small" type="success">{{ t('app.ready') }}</NTag>
               <NButton
                 quaternary
                 circle
-                aria-label="Toggle color mode"
+                :aria-label="t('app.theme')"
                 @click="appStore.toggleTheme"
               >
                 <template #icon
@@ -178,11 +186,11 @@ const pageDescription = computed(() =>
               <strong>{{ jobNotice.title }}</strong
               ><small>{{ jobNotice.body }}</small>
             </button>
-            <NButton quaternary circle aria-label="Dismiss notification" @click="jobNotice = null">
+            <NButton quaternary circle :aria-label="t('app.dismiss')" @click="jobNotice = null">
               <template #icon><NIcon :component="CloseOutline" /></template>
             </NButton>
           </div>
-          <main class="page-content"><RouterView /></main>
+          <main id="main-content" class="page-content" tabindex="-1"><RouterView /></main>
         </NLayoutContent>
       </NLayout>
     </NMessageProvider>
@@ -190,6 +198,20 @@ const pageDescription = computed(() =>
 </template>
 
 <style scoped>
+.skip-link {
+  position: fixed;
+  z-index: 9999;
+  top: 8px;
+  left: 8px;
+  padding: 9px 13px;
+  color: #fff;
+  border-radius: 8px;
+  background: #d43c84;
+  transform: translateY(-160%);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
 .job-notice {
   display: flex;
   align-items: center;

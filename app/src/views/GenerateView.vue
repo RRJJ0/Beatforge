@@ -26,10 +26,12 @@ import {
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
 import { isDesktopRuntime, selectAudioFile, selectBeatmapFile } from '@/services/desktop'
+import { useI18n } from '@/i18n'
 
 const router = useRouter()
 const message = useMessage()
 const jobsStore = useJobsStore()
+const { t } = useI18n()
 const audioFile = ref('')
 const title = ref('')
 const artist = ref('')
@@ -66,7 +68,7 @@ const referenceDisplayName = computed(() => referenceBeatmap.value.split(/[\\/]/
 
 async function chooseAudio() {
   if (!isDesktopRuntime()) {
-    message.info('Native file selection is available in the Tauri desktop app.')
+    message.info(t('generate.pickDesktop'))
     return
   }
   const selected = await selectAudioFile()
@@ -78,7 +80,7 @@ async function chooseAudio() {
 
 async function chooseReferenceBeatmap() {
   if (!isDesktopRuntime()) {
-    message.info('Native file selection is available in the Tauri desktop app.')
+    message.info(t('generate.pickDesktop'))
     return
   }
   const selected = await selectBeatmapFile()
@@ -88,7 +90,7 @@ async function chooseReferenceBeatmap() {
 async function createJob() {
   attempted.value = true
   if (!canGenerate.value) {
-    message.warning('Add an audio file, title, and artist before generating.')
+    message.warning(t('generate.missing'))
     return
   }
   creating.value = true
@@ -109,10 +111,10 @@ async function createJob() {
       hitsounded: generateHitsounds.value,
       scenario: scenario.value,
     })
-    message.success('Worker job added to the queue.')
+    message.success(t('generate.queued'))
     router.push('/jobs')
   } catch (reason) {
-    message.error(`Could not create job: ${String(reason)}`)
+    message.error(t('generate.failed', { error: String(reason) }))
   } finally {
     creating.value = false
   }
@@ -125,33 +127,33 @@ async function createJob() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Source audio</h2>
-            <p class="section-copy">Choose a clean, full-length track for the best result.</p>
+            <h2 class="section-title">{{ t('generate.source') }}</h2>
+            <p class="section-copy">{{ t('generate.sourceHelp') }}</p>
           </div>
-          <NTag v-if="audioFile" size="small" type="success">Audio ready</NTag>
+          <NTag v-if="audioFile" size="small" type="success">{{ t('generate.audioReady') }}</NTag>
         </div>
         <button class="audio-dropzone" type="button" @click="chooseAudio">
           <div class="upload-icon">
             <NIcon :component="audioFile ? MusicalNotesOutline : CloudUploadOutline" />
           </div>
-          <strong>{{ audioDisplayName || 'Choose an audio file' }}</strong>
-          <p>{{ audioFile || 'Native file picker · MP3, WAV, OGG, M4A, FLAC' }}</p>
+          <strong>{{ audioDisplayName || t('generate.chooseAudio') }}</strong>
+          <p>{{ audioFile || t('generate.audioTypes') }}</p>
         </button>
         <NAlert
           v-if="attempted && !audioFile"
           class="validation-alert"
           type="error"
           :show-icon="false"
-          >Select an audio file to continue.</NAlert
+          >{{ t('generate.audioRequired') }}</NAlert
         >
         <div class="reference-row">
           <div>
-            <strong>Reference beatmap</strong>
-            <small>{{ referenceDisplayName || 'Optional · use an existing .osu as context' }}</small>
+            <strong>{{ t('generate.reference') }}</strong>
+            <small>{{ referenceDisplayName || t('generate.referenceHelp') }}</small>
           </div>
           <NButton secondary @click="chooseReferenceBeatmap">
             <template #icon><NIcon :component="DocumentAttachOutline" /></template>
-            {{ referenceBeatmap ? 'Change' : 'Choose .osu' }}
+            {{ referenceBeatmap ? t('common.change') : t('generate.chooseOsu') }}
           </NButton>
         </div>
       </NCard>
@@ -159,28 +161,28 @@ async function createJob() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Beatmap details</h2>
-            <p class="section-copy">These fields will be written into the .osu metadata.</p>
+            <h2 class="section-title">{{ t('generate.details') }}</h2>
+            <p class="section-copy">{{ t('generate.detailsHelp') }}</p>
           </div>
         </div>
         <NForm label-placement="top">
           <div class="two-column">
             <NFormItem
-              label="Title"
+              :label="t('generate.title')"
               required
               :validation-status="attempted && !title.trim() ? 'error' : undefined"
-              :feedback="attempted && !title.trim() ? 'Enter the song title' : undefined"
-              ><NInput v-model:value="title" placeholder="Song title"
+              :feedback="attempted && !title.trim() ? t('generate.enterTitle') : undefined"
+              ><NInput v-model:value="title" :placeholder="t('generate.songTitle')"
             /></NFormItem>
             <NFormItem
-              label="Artist"
+              :label="t('generate.artist')"
               required
               :validation-status="attempted && !artist.trim() ? 'error' : undefined"
-              :feedback="attempted && !artist.trim() ? 'Enter the artist name' : undefined"
-              ><NInput v-model:value="artist" placeholder="Artist name"
+              :feedback="attempted && !artist.trim() ? t('generate.enterArtist') : undefined"
+              ><NInput v-model:value="artist" :placeholder="t('generate.artistName')"
             /></NFormItem>
           </div>
-          <NFormItem label="Creator"><NInput value="Beatforge AI" disabled /></NFormItem>
+          <NFormItem :label="t('generate.creator')"><NInput value="Beatforge AI" disabled /></NFormItem>
         </NForm>
       </NCard>
     </section>
@@ -189,15 +191,15 @@ async function createJob() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
-            <h2 class="section-title">Generation setup</h2>
-            <p class="section-copy">Tune the target play experience.</p>
+            <h2 class="section-title">{{ t('generate.setup') }}</h2>
+            <p class="section-copy">{{ t('generate.setupHelp') }}</p>
           </div>
         </div>
         <NForm label-placement="top">
-          <NFormItem label="Model"
+          <NFormItem :label="t('generate.model')"
             ><NSelect v-model:value="model" :options="modelOptions"
           /></NFormItem>
-          <NFormItem label="Target star rating">
+          <NFormItem :label="t('generate.rating')">
             <div class="slider-field">
               <NSlider v-model:value="difficulty" :min="1" :max="8" :step="0.1" /><NInputNumber
                 v-model:value="difficulty"
@@ -209,46 +211,46 @@ async function createJob() {
             </div>
           </NFormItem>
           <div class="switch-row">
-            <div><strong>Advanced controls</strong><small>Seed, descriptors, AR, CS, and hitsounds</small></div>
-            <NSwitch v-model:value="isAdvanced" />
+            <div><strong>{{ t('generate.advanced') }}</strong><small>{{ t('generate.advancedHelp') }}</small></div>
+            <NSwitch v-model:value="isAdvanced" :aria-label="t('generate.advanced')" />
           </div>
           <template v-if="isAdvanced">
-            <NFormItem label="Seed">
+            <NFormItem :label="t('generate.seed')">
               <NInputNumber v-model:value="seed" :min="0" :max="65535" :step="1" />
             </NFormItem>
-            <NFormItem label="Descriptors">
+            <NFormItem :label="t('generate.descriptors')">
               <NDynamicTags v-model:value="descriptors" />
             </NFormItem>
-            <NFormItem label="Negative descriptors">
+            <NFormItem :label="t('generate.negative')">
               <NDynamicTags v-model:value="negativeDescriptors" />
             </NFormItem>
             <div class="two-column compact">
-              <NFormItem label="Approach rate"
+              <NFormItem :label="t('generate.ar')"
                 ><NInputNumber v-model:value="approachRate" :min="0" :max="10"
               /></NFormItem>
-              <NFormItem label="Circle size"
+              <NFormItem :label="t('generate.cs')"
                 ><NInputNumber v-model:value="circleSize" :min="0" :max="10"
               /></NFormItem>
             </div>
             <div class="switch-row">
               <div>
-                <strong>Generate hitsounds</strong><small>Add model-predicted samples</small>
+                <strong>{{ t('generate.hitsounds') }}</strong><small>{{ t('generate.hitsoundsHelp') }}</small>
               </div>
-              <NSwitch v-model:value="generateHitsounds" />
+              <NSwitch v-model:value="generateHitsounds" :aria-label="t('generate.hitsounds')" />
             </div>
-            <NFormItem label="Backend / test scenario">
+            <NFormItem :label="t('generate.scenario')">
               <NSelect v-model:value="scenario" :options="scenarioOptions" />
             </NFormItem>
           </template>
         </NForm>
         <NAlert class="local-note" type="info" :show-icon="false"
-          >Generation runs locally. Your audio never leaves this computer.</NAlert
+          >{{ t('generate.local') }}</NAlert
         >
         <NButton type="primary" size="large" block :loading="creating" @click="createJob">
-          <template #icon><NIcon :component="SparklesOutline" /></template>Generate beatmap
+          <template #icon><NIcon :component="SparklesOutline" /></template>{{ t('generate.action') }}
         </NButton>
         <div class="estimate">
-          <NIcon :component="PlayOutline" /><span>Estimated time: 3–6 minutes</span>
+          <NIcon :component="PlayOutline" /><span>{{ t('generate.estimate') }}</span>
         </div>
       </NCard>
     </aside>

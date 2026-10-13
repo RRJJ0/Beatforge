@@ -14,6 +14,7 @@ import {
 import { useJobsStore } from '@/stores/jobs'
 import { useDesktopStore } from '@/stores/desktop'
 import JobPreviewModal from '@/components/JobPreviewModal.vue'
+import { useI18n } from '@/i18n'
 import type { BeatmapStatistics, GenerationJob } from '@/types'
 import {
   importDesktopJobOutput,
@@ -27,6 +28,7 @@ const message = useMessage()
 const route = useRoute()
 const previewJobId = ref<string | null>(null)
 const previewVisible = ref(false)
+const { t } = useI18n()
 const statusType = {
   running: 'info',
   validating: 'info',
@@ -106,27 +108,27 @@ function openPreview(jobId: string) {
 <template>
   <div class="stat-grid">
     <div class="stat-card">
-      <div class="stat-label">Active jobs</div>
+      <div class="stat-label">{{ t('jobs.active') }}</div>
       <div class="stat-value">{{ jobsStore.activeCount }}</div>
-      <div class="stat-note">Single-worker JSONL queue</div>
+      <div class="stat-note">{{ t('jobs.queueNote') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">GPU utilization</div>
+      <div class="stat-label">{{ t('jobs.gpu') }}</div>
       <div class="stat-value">{{ desktopStore.system?.gpu.available ? 'Ready' : '—' }}</div>
-      <div class="stat-note">{{ desktopStore.system?.gpu.name ?? 'Checking hardware' }}</div>
+      <div class="stat-note">{{ desktopStore.system?.gpu.name ?? t('common.checking') }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Completed today</div>
+      <div class="stat-label">{{ t('jobs.completedToday') }}</div>
       <div class="stat-value">{{ jobsStore.completedToday }}</div>
-      <div class="stat-note">Persisted in SQLite</div>
+      <div class="stat-note">{{ t('jobs.persisted') }}</div>
     </div>
   </div>
 
   <NCard class="panel-card" :bordered="false">
     <div class="card-heading">
       <div>
-        <h2 class="section-title">Generation queue</h2>
-        <p class="section-copy">Jobs run one at a time to keep GPU memory stable.</p>
+        <h2 class="section-title">{{ t('jobs.queue') }}</h2>
+        <p class="section-copy">{{ t('jobs.queueHelp') }}</p>
       </div>
       <NTag size="small" round type="info">Protocol v1</NTag>
     </div>
@@ -145,7 +147,7 @@ function openPreview(jobId: string) {
               <strong>{{ job.title }}</strong
               ><span>{{ job.artist }} · {{ job.audioFile }}</span>
             </div>
-            <NTag size="small" round :type="statusType[job.status]">{{ job.status }}</NTag>
+            <NTag size="small" round :type="statusType[job.status]">{{ t(`status.${job.status}` as 'status.completed') }}</NTag>
           </div>
           <div class="job-meta">
             <span class="mono">{{ job.id }}</span
@@ -210,8 +212,8 @@ function openPreview(jobId: string) {
             secondary
             circle
             size="small"
-            title="Preview validated result"
-            aria-label="Preview validated result"
+            :title="t('jobs.preview')"
+            :aria-label="t('jobs.preview')"
             @click="openPreview(job.id)"
             ><template #icon><NIcon :component="EyeOutline" /></template
           ></NButton>
@@ -220,8 +222,8 @@ function openPreview(jobId: string) {
             quaternary
             circle
             size="small"
-            title="Show validated output"
-            aria-label="Show validated output"
+            :title="t('jobs.show')"
+            :aria-label="t('jobs.show')"
             @click="runAction(() => revealDesktopJobOutput(job.id))"
             ><template #icon><NIcon :component="FolderOpenOutline" /></template
           ></NButton>
@@ -230,8 +232,8 @@ function openPreview(jobId: string) {
             secondary
             circle
             size="small"
-            title="Import into osu!"
-            aria-label="Import into osu!"
+            :title="t('jobs.import')"
+            :aria-label="t('jobs.import')"
             @click="
               runAction(() => importDesktopJobOutput(job.id).then(() => undefined), 'Import opened')
             "
@@ -243,8 +245,8 @@ function openPreview(jobId: string) {
             circle
             size="small"
             type="warning"
-            title="Import failed output anyway"
-            aria-label="Import failed output anyway"
+            :title="t('jobs.importFailed')"
+            :aria-label="t('jobs.importFailed')"
             @click="
               importFailedOutput(
                 job.id,
@@ -258,7 +260,7 @@ function openPreview(jobId: string) {
             quaternary
             circle
             size="small"
-            aria-label="Cancel worker"
+            :aria-label="t('jobs.cancel')"
             @click="runAction(() => jobsStore.cancelJob(job.id))"
             ><template #icon><NIcon :component="CloseOutline" /></template
           ></NButton>
@@ -267,7 +269,7 @@ function openPreview(jobId: string) {
             secondary
             circle
             size="small"
-            aria-label="Retry worker"
+            :aria-label="t('jobs.retry')"
             @click="runAction(() => jobsStore.retryJob(job.id), 'Job queued again')"
             ><template #icon><NIcon :component="RefreshOutline" /></template
           ></NButton>
@@ -276,14 +278,14 @@ function openPreview(jobId: string) {
             quaternary
             circle
             size="small"
-            aria-label="Remove job"
+            :aria-label="t('jobs.delete')"
             @click="removeJob(job)"
             ><template #icon><NIcon :component="TrashOutline" /></template
           ></NButton>
         </div>
       </article>
     </div>
-    <NEmpty v-else description="No jobs in the queue" />
+    <NEmpty v-else :description="t('jobs.empty')" />
   </NCard>
   <JobPreviewModal v-model:show="previewVisible" :job-id="previewJobId" />
 </template>

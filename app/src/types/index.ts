@@ -287,7 +287,10 @@ export interface AppSettings {
   repairGeneratedOutput: boolean
   checkUpdates: boolean
   desktopNotifications: boolean
+  locale: AppLocale
 }
+
+export type AppLocale = 'en' | 'zh-TW'
 
 export interface SettingsImportItem {
   field: keyof AppSettings

@@ -4,9 +4,11 @@ import { NAlert, NModal, NSelect, NSpin, NTag } from 'naive-ui'
 import type { DifficultyPreview, JobPreview } from '@/types'
 import { getDesktopJobPreview } from '@/services/desktop'
 import { downsamplePeaks, formatPreviewTime } from '@/utils/audioPreview'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{ show: boolean; jobId: string | null }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
+const { t } = useI18n()
 const audio = ref<HTMLAudioElement | null>(null)
 const preview = ref<(JobPreview & { audioUrl: string | null }) | null>(null)
 const selectedId = ref<string | null>(null)
@@ -72,7 +74,7 @@ async function decodeWaveform(url: string, maxPoints: number, sequence: number) 
       await context.close()
     }
   } catch {
-    if (sequence === loadSequence) audioError.value = 'Waveform is unavailable for this audio format.'
+    if (sequence === loadSequence) audioError.value = t('preview.waveformUnavailable')
   }
 }
 
@@ -117,7 +119,7 @@ function updateAudioDuration() {
 }
 
 function handleAudioError() {
-  audioError.value = 'The browser could not play this audio format. Density preview is still available.'
+  audioError.value = t('preview.audioUnavailable')
 }
 
 function seek(event: MouseEvent) {
@@ -126,6 +128,18 @@ function seek(event: MouseEvent) {
   const seconds = (timelineMs.value * ratio) / 1000
   currentSeconds.value = seconds
   if (audio.value && Number.isFinite(audio.value.duration)) audio.value.currentTime = Math.min(seconds, audio.value.duration)
+}
+
+function seekWithKeyboard(event: KeyboardEvent) {
+  if (!audio.value || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  if (event.key === 'Home') audio.value.currentTime = 0
+  else if (event.key === 'End') audio.value.currentTime = audio.value.duration
+  else audio.value.currentTime = Math.min(
+    Math.max(audio.value.currentTime + (event.key === 'ArrowRight' ? 5 : -5), 0),
+    audio.value.duration,
+  )
+  updateAudioTime()
 }
 
 watch(() => [props.show, props.jobId], load, { immediate: true })
@@ -140,7 +154,7 @@ onBeforeUnmount(() => {
     :show="show"
     preset="card"
     class="preview-modal"
-    title="Result preview"
+    :title="t('preview.title')"
     :bordered="false"
     @update:show="(value) => (value ? undefined : close())"
   >
@@ -149,11 +163,11 @@ onBeforeUnmount(() => {
       <template v-else-if="preview && selected">
         <div class="preview-heading">
           <NSelect v-model:value="selectedId" :options="difficultyOptions" />
-          <NTag round size="small">{{ selected.objectCount }} objects</NTag>
+          <NTag round size="small">{{ t('preview.objects', { count: selected.objectCount }) }}</NTag>
         </div>
 
         <NAlert v-if="preview.audioUnavailableReason" type="warning" class="preview-alert">
-          {{ preview.audioUnavailableReason }} Density preview remains available.
+          {{ preview.audioUnavailableReason }} {{ t('preview.densityFallback') }}
         </NAlert>
         <NAlert v-else-if="audioError" type="warning" class="preview-alert">
           {{ audioError }}
@@ -172,7 +186,7 @@ onBeforeUnmount(() => {
           @error="handleAudioError"
         ></audio>
 
-        <div class="timeline" role="slider" tabindex="0" aria-label="Preview timeline" @click="seek">
+        <div class="timeline" role="slider" tabindex="0" :aria-label="t('preview.timeline')" :aria-valuemin="0" :aria-valuemax="Math.round(timelineMs / 1000)" :aria-valuenow="Math.round(currentSeconds)" @click="seek" @keydown="seekWithKeyboard">
           <svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
             <rect
               v-for="(bar, index) in densityRects"
@@ -198,12 +212,12 @@ onBeforeUnmount(() => {
         <div class="timeline-meta">
           <span>{{ formatPreviewTime(currentSeconds) }} / {{ formatPreviewTime(timelineMs / 1000) }}</span>
           <span v-if="selected.firstObjectMs != null">
-            First object {{ formatPreviewTime(selected.firstObjectMs / 1000) }}
+            {{ t('preview.first', { time: formatPreviewTime(selected.firstObjectMs / 1000) }) }}
           </span>
-          <span v-else>No hit objects</span>
+          <span v-else>{{ t('preview.none') }}</span>
         </div>
         <p class="preview-note">
-          Pink bars show validated hit-object density. This preview is read-only; use osu! Editor for editing.
+          {{ t('preview.note') }}
         </p>
       </template>
     </NSpin>
