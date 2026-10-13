@@ -112,13 +112,16 @@ fn drain_worker_stderr<R: Read>(mut stderr: R, log_path: &Path) {
     }
 }
 
+fn valid_job_id(id: &str) -> bool {
+    !id.is_empty()
+        && id != "."
+        && id != ".."
+        && !id.contains(['/', '\\'])
+        && Path::new(id).components().count() == 1
+}
+
 fn remove_managed_job_directory(jobs_root: &Path, id: &str) -> Result<(), String> {
-    if id.is_empty()
-        || id == "."
-        || id == ".."
-        || id.contains(['/', '\\'])
-        || Path::new(id).components().count() != 1
-    {
+    if !valid_job_id(id) {
         return Err("Refusing to clean an invalid job id".into());
     }
     let target = jobs_root.join(id);
@@ -138,9 +141,43 @@ fn remove_managed_job_directory(jobs_root: &Path, id: &str) -> Result<(), String
         .map_err(|error| format!("Failed to clean job temporary files: {error}"))
 }
 
+fn remove_managed_job_log(logs_root: &Path, id: &str) -> Result<(), String> {
+    if !valid_job_id(id) {
+        return Err("Refusing to remove a log for an invalid job id".into());
+    }
+    let target = logs_root.join(format!("job-{id}.log"));
+    let metadata = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("Failed to inspect the managed job log: {error}")),
+    };
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("Refusing to remove a job log that is not a regular file".into());
+    }
+    let root = logs_root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve logs directory: {error}"))?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| "Managed job log has no parent directory".to_string())?
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve the job log directory: {error}"))?;
+    if parent != root {
+        return Err("Refusing to remove a job log outside the managed logs directory".into());
+    }
+    std::fs::remove_file(&target)
+        .map_err(|error| format!("Failed to remove the managed job log: {error}"))
+}
+
 pub(crate) fn cleanup_job_artifacts(app: &AppHandle, id: &str) -> Result<(), String> {
     let paths = build_paths(app)?;
     remove_managed_job_directory(&PathBuf::from(paths.jobs), id)
+}
+
+pub(crate) fn delete_job_artifacts(app: &AppHandle, id: &str) -> Result<(), String> {
+    let paths = build_paths(app)?;
+    remove_managed_job_directory(&PathBuf::from(&paths.jobs), id)?;
+    remove_managed_job_log(&PathBuf::from(paths.logs), id)
 }
 
 fn wait_for_exit(child: &mut Child, timeout: Duration) -> bool {
@@ -716,7 +753,10 @@ fn coordinator(app: AppHandle, receiver: Receiver<ManagerCommand>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{drain_worker_stderr, is_runtime_loading_stage, remove_managed_job_directory};
+    use super::{
+        drain_worker_stderr, is_runtime_loading_stage, remove_managed_job_directory,
+        remove_managed_job_log,
+    };
     use std::{fs, time::SystemTime};
 
     #[test]
@@ -753,7 +793,29 @@ mod tests {
         fs::write(job.join("partial.tmp"), b"partial").unwrap();
         remove_managed_job_directory(&root, "BF-TEST").unwrap();
         assert!(!job.exists());
+        remove_managed_job_directory(&root, "BF-TEST").unwrap();
         assert!(remove_managed_job_directory(&root, "../outside").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deletion_removes_only_the_exact_managed_job_log() {
+        let suffix = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("beatforge-job-log-cleanup-{suffix}"));
+        fs::create_dir_all(&root).unwrap();
+        let selected = root.join("job-BF-TEST.log");
+        let other = root.join("job-BF-OTHER.log");
+        fs::write(&selected, b"selected").unwrap();
+        fs::write(&other, b"other").unwrap();
+
+        remove_managed_job_log(&root, "BF-TEST").unwrap();
+        assert!(!selected.exists());
+        assert!(other.exists());
+        remove_managed_job_log(&root, "BF-TEST").unwrap();
+        assert!(remove_managed_job_log(&root, "../outside").is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

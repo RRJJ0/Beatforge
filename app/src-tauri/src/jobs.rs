@@ -270,13 +270,41 @@ pub fn reset_for_retry(connection: &Connection, id: &str) -> Result<(), String> 
     Ok(())
 }
 
-pub fn delete(connection: &Connection, id: &str) -> Result<(), String> {
-    connection
+pub fn delete_terminal(connection: &Connection, id: &str) -> Result<(), String> {
+    let status: Option<String> = connection
+        .query_row(
+            "SELECT status FROM jobs WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let status = status.ok_or_else(|| "Job was not found".to_string())?;
+    if matches!(status.as_str(), "running" | "queued" | "validating") {
+        return Err("An active job cannot be deleted".into());
+    }
+    let changed = connection
         .execute(
             "DELETE FROM jobs WHERE id = ?1 AND status NOT IN ('running', 'queued', 'validating')",
             params![id],
         )
         .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("Job changed state before it could be deleted".into());
+    }
+    Ok(())
+}
+
+pub fn rollback_queued_insert(connection: &Connection, id: &str) -> Result<(), String> {
+    let changed = connection
+        .execute(
+            "DELETE FROM jobs WHERE id = ?1 AND status = 'queued' AND worker_pid IS NULL",
+            params![id],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("Queued job could not be rolled back safely".into());
+    }
     Ok(())
 }
 
@@ -454,5 +482,61 @@ mod tests {
         assert_eq!(persisted.status, "completed");
         assert_eq!(persisted.validation_report, Some(report));
         assert!(persisted.output_path.unwrap().contains("validated"));
+    }
+
+    #[test]
+    fn regeneration_preserves_the_source_and_terminal_delete_is_explicit() {
+        let connection = version_one_database();
+        migrate(&connection).expect("migration succeeds");
+        let input = StartJobInput {
+            title: "Source Track".into(),
+            artist: "Source Artist".into(),
+            audio_file: "C:\\Music\\source.flac".into(),
+            model: crate::packages::STANDARD_MODEL_ID.into(),
+            difficulty: 5.5,
+            gamemode: 0,
+            seed: 321,
+            descriptors: vec!["streams".into()],
+            negative_descriptors: vec![],
+            reference_beatmap: Some("C:\\Maps\\reference.osu".into()),
+            approach_rate: Some(9.2),
+            circle_size: Some(4.0),
+            hitsounded: true,
+            scenario: "success".into(),
+        };
+        insert(&connection, "BF-SOURCE", &input).unwrap();
+        assert!(delete_terminal(&connection, "BF-SOURCE").is_err());
+        update_state(
+            &connection,
+            "BF-SOURCE",
+            "completed",
+            100,
+            "Completed",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let copied_input = get_input(&connection, "BF-SOURCE").unwrap().unwrap();
+        insert(&connection, "BF-REGENERATED", &copied_input).unwrap();
+        assert!(get(&connection, "BF-SOURCE").unwrap().is_some());
+        assert_eq!(
+            get_input(&connection, "BF-REGENERATED")
+                .unwrap()
+                .unwrap()
+                .reference_beatmap
+                .as_deref(),
+            Some("C:\\Maps\\reference.osu")
+        );
+
+        insert(&connection, "BF-ROLLBACK", &copied_input).unwrap();
+        rollback_queued_insert(&connection, "BF-ROLLBACK").unwrap();
+        assert!(get(&connection, "BF-ROLLBACK").unwrap().is_none());
+
+        delete_terminal(&connection, "BF-SOURCE").unwrap();
+        assert!(get(&connection, "BF-SOURCE").unwrap().is_none());
+        assert!(get(&connection, "BF-REGENERATED").unwrap().is_some());
+        assert!(delete_terminal(&connection, "BF-MISSING").is_err());
     }
 }

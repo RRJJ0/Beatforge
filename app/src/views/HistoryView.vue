@@ -13,9 +13,15 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { FolderOpenOutline, OpenOutline, RefreshOutline, SearchOutline } from '@vicons/ionicons5'
+import {
+  FolderOpenOutline,
+  OpenOutline,
+  RefreshOutline,
+  SearchOutline,
+  TrashOutline,
+} from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
-import type { JobStatus } from '@/types'
+import type { GenerationJob, JobStatus } from '@/types'
 import {
   importDesktopJobOutput,
   isDesktopRuntime,
@@ -129,6 +135,29 @@ async function runAction(action: () => Promise<unknown>, success?: string) {
   } catch (reason) {
     message.error(String(reason))
   }
+}
+
+async function regenerate(job: GenerationJob) {
+  const confirmed = window.confirm(
+    `Create a new job using the saved settings from ${job.id}? ` +
+      'The original job will remain unchanged. Its audio and reference files must still exist.',
+  )
+  if (!confirmed) return
+  try {
+    const created = await jobsStore.regenerateJob(job.id)
+    message.success(`Created ${created.id}`)
+  } catch (reason) {
+    message.error(String(reason))
+  }
+}
+
+async function remove(job: GenerationJob) {
+  const confirmed = window.confirm(
+    `Permanently delete ${job.id} and its managed raw, validated, report, log, and temporary files? ` +
+      'The original audio and reference files outside Beatforge will not be deleted.',
+  )
+  if (!confirmed) return
+  await runAction(() => jobsStore.removeJob(job.id), 'Job and managed files deleted')
 }
 </script>
 
@@ -252,6 +281,31 @@ async function runAction(action: () => Promise<unknown>, success?: string) {
               >
                 <template #icon><NIcon :component="OpenOutline" /></template>
               </NButton>
+              <NButton
+                v-if="
+                  !['running', 'queued', 'validating'].includes(job.status) && isDesktopRuntime()
+                "
+                quaternary
+                circle
+                size="small"
+                title="Regenerate as a new job"
+                aria-label="Regenerate as a new job"
+                @click="regenerate(job)"
+              >
+                <template #icon><NIcon :component="RefreshOutline" /></template>
+              </NButton>
+              <NButton
+                v-if="!['running', 'queued', 'validating'].includes(job.status)"
+                quaternary
+                circle
+                size="small"
+                type="error"
+                title="Delete job and managed files"
+                aria-label="Delete job and managed files"
+                @click="remove(job)"
+              >
+                <template #icon><NIcon :component="TrashOutline" /></template>
+              </NButton>
             </div>
           </div>
         </div>
@@ -300,7 +354,7 @@ async function runAction(action: () => Promise<unknown>, success?: string) {
 }
 .table-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.5fr) 130px 100px minmax(150px, 0.8fr) 165px 76px;
+  grid-template-columns: minmax(260px, 1.5fr) 130px 100px minmax(150px, 0.8fr) 165px 150px;
   gap: 14px;
   align-items: center;
   min-height: 76px;

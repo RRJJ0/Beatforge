@@ -655,7 +655,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 規劃子項目：
 
 - [x] 7.1：建立正式歷史資料檢視、搜尋、篩選與排序。
-- [ ] 7.2：完成歷史任務刪除、重新生成與檔案一致性處理。
+- [x] 7.2：完成歷史任務刪除、重新生成與檔案一致性處理。
 - [ ] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
 - [ ] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
 - [ ] 7.5：加入桌面通知與背景任務完成／失敗提示。
@@ -675,12 +675,13 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.2 歷史動作與檔案一致性
 
-- 刪除前顯示影響範圍，並安全移除 job record 與該 job 的受管理檔案。
-- 重新生成時複製原任務可重用的輸入與有效設定，建立新的 job identity，不覆寫舊任務。
-- 輸入音訊、reference 或輸出檔遺失時顯示可理解狀態與可行動提示。
-- 加入刪除、重新生成及資料庫／檔案不同步的測試。
+- History 與 Jobs 的刪除操作會先列出影響範圍並要求確認；後端拒絕刪除 queued／running／validating job，只允許清理 job ID 對應的直接 managed directory 與精確命名的 job log，成功後才移除 SQLite record。外部音訊與 reference 永遠不在刪除範圍內。
+- History 的 regenerate 會從原 job 的完整 `request_json` 複製輸入、descriptor、reference、難度與 seed，建立新的 job identity 並排入 worker；原 job、artifact、validation report 與 provenance 保持不變。
+- Regenerate 會在建立新紀錄前重新驗證音訊與 reference path；遺失或類型不符時回傳包含 saved input context 的可理解錯誤。新 job 若無法送入 queue，僅允許回滾尚未啟動的 queued insert。
+- 已完成但輸出遭移動或刪除的紀錄仍留在 History；開啟／匯入會沿用 artifact identity gate 回報無法解析，不會誤開其他路徑。刪除遇到遺失的 job directory／log 可安全重試，越界 ID、非 regular log 與 active state 一律拒絕。
+- Rust lifecycle 測試涵蓋 source preservation、新 identity、saved reference 複製、active delete rejection、queued rollback、missing record，以及 job directory／log 的精確清理與越界拒絕。
 
-驗收：操作只影響指定 job；無法解析或位於受管理目錄外的路徑不得刪除，舊任務與 provenance 保持可追蹤。
+驗收：操作只影響指定 job；無法解析或位於受管理目錄外的路徑不得刪除，舊任務與 provenance 保持可追蹤。Rust lifecycle、前端單元測試、type-check 與 production build 通過。
 
 #### 7.3 設定預設值、匯入／匯出與 migration
 

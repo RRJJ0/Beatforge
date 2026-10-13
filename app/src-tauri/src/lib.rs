@@ -1203,9 +1203,44 @@ fn retry_job(
 }
 
 #[tauri::command]
+fn regenerate_job(
+    app: AppHandle,
+    manager: tauri::State<'_, worker::WorkerManager>,
+    job_id: String,
+) -> Result<jobs::JobRecord, String> {
+    let (connection, _) = open_database(&app)?;
+    let source = jobs::get(&connection, &job_id)?
+        .ok_or_else(|| "The source job was not found".to_string())?;
+    if matches!(source.status.as_str(), "running" | "queued" | "validating") {
+        return Err("An active job cannot be regenerated".into());
+    }
+    let input = jobs::get_input(&connection, &job_id)?
+        .ok_or_else(|| "The source job request is unavailable".to_string())?;
+    validate_job_input(&input).map_err(|error| {
+        format!("The source job cannot be regenerated with its saved inputs: {error}")
+    })?;
+
+    let new_id = next_job_id();
+    let record = jobs::insert(&connection, &new_id, &input)?;
+    if let Err(error) = manager.enqueue(new_id.clone(), input) {
+        let _ = jobs::rollback_queued_insert(&connection, &new_id);
+        return Err(format!("Could not queue the regenerated job: {error}"));
+    }
+    Ok(record)
+}
+
+#[tauri::command]
 fn delete_job(app: AppHandle, job_id: String) -> Result<(), String> {
     let (connection, _) = open_database(&app)?;
-    jobs::delete(&connection, &job_id)
+    let job = jobs::get(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    if matches!(job.status.as_str(), "running" | "queued" | "validating") {
+        return Err("An active job cannot be deleted".into());
+    }
+    // Remove only this job's direct managed directory before deleting its
+    // database record. If filesystem cleanup fails, the history record stays
+    // available so the mismatch remains visible and can be retried safely.
+    worker::delete_job_artifacts(&app, &job_id)?;
+    jobs::delete_terminal(&connection, &job_id)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1258,6 +1293,7 @@ pub fn run() {
             remove_model_package,
             cancel_job,
             retry_job,
+            regenerate_job,
             delete_job,
             reveal_job_output,
             import_job_output,

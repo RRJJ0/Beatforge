@@ -10,7 +10,7 @@ import {
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
 import { useDesktopStore } from '@/stores/desktop'
-import type { BeatmapStatistics } from '@/types'
+import type { BeatmapStatistics, GenerationJob } from '@/types'
 import {
   importDesktopJobOutput,
   importFailedDesktopJobOutput,
@@ -69,6 +69,15 @@ async function importFailedOutput(jobId: string, errorCount: number) {
     () => importFailedDesktopJobOutput(jobId).then(() => undefined),
     'Raw output sent to osu!',
   )
+}
+
+async function removeJob(job: GenerationJob) {
+  const confirmed = window.confirm(
+    `Permanently delete ${job.id} and its managed raw, validated, report, log, and temporary files? ` +
+      'The original audio and reference files outside Beatforge will not be deleted.',
+  )
+  if (!confirmed) return
+  await runAction(() => jobsStore.removeJob(job.id), 'Job and managed files deleted')
 }
 </script>
 
@@ -148,7 +157,9 @@ async function importFailedOutput(jobId: string, errorCount: number) {
               errors
             </span>
             <span>
-              {{ job.validationReport.issues.filter((issue) => issue.severity === 'warning').length }}
+              {{
+                job.validationReport.issues.filter((issue) => issue.severity === 'warning').length
+              }}
               warnings
             </span>
           </div>
@@ -183,7 +194,9 @@ async function importFailedOutput(jobId: string, errorCount: number) {
             size="small"
             title="Import into osu!"
             aria-label="Import into osu!"
-            @click="runAction(() => importDesktopJobOutput(job.id).then(() => undefined), 'Import opened')"
+            @click="
+              runAction(() => importDesktopJobOutput(job.id).then(() => undefined), 'Import opened')
+            "
             ><template #icon><NIcon :component="OpenOutline" /></template
           ></NButton>
           <NButton
@@ -226,7 +239,7 @@ async function importFailedOutput(jobId: string, errorCount: number) {
             circle
             size="small"
             aria-label="Remove job"
-            @click="runAction(() => jobsStore.removeJob(job.id))"
+            @click="removeJob(job)"
             ><template #icon><NIcon :component="TrashOutline" /></template
           ></NButton>
         </div>

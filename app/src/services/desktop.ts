@@ -129,7 +129,9 @@ export function onEnvironmentInstallEvent(
 }
 
 export function onPackageProgressEvent(
-  handler: (event: Pick<ManagedPackage, 'id' | 'status' | 'progress' | 'bytesDownloaded' | 'sizeBytes'>) => void,
+  handler: (
+    event: Pick<ManagedPackage, 'id' | 'status' | 'progress' | 'bytesDownloaded' | 'sizeBytes'>,
+  ) => void,
 ): Promise<UnlistenFn> {
   return listen('package-progress-event', (event) => {
     const payload = event.payload as {
@@ -149,6 +151,10 @@ export async function cancelDesktopJob(jobId: string) {
 
 export async function retryDesktopJob(jobId: string) {
   return invoke<void>('retry_job', { jobId })
+}
+
+export async function regenerateDesktopJob(jobId: string) {
+  return invoke<GenerationJob>('regenerate_job', { jobId })
 }
 
 export async function deleteDesktopJob(jobId: string) {

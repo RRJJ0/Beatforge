@@ -9,6 +9,7 @@ import {
   isDesktopRuntime,
   listDesktopJobs,
   onDesktopJobEvent,
+  regenerateDesktopJob,
   retryDesktopJob,
 } from '@/services/desktop'
 
@@ -163,6 +164,15 @@ export const useJobsStore = defineStore('jobs', () => {
     startBrowserJob(id)
   }
 
+  async function regenerateJob(id: string) {
+    if (!desktop) {
+      throw new Error('Regeneration from history is available in the desktop app.')
+    }
+    const job = await regenerateDesktopJob(id)
+    upsert(job)
+    return job
+  }
+
   async function removeJob(id: string) {
     if (desktop) await deleteDesktopJob(id)
     mockTasks.get(id)?.cancel()
@@ -185,6 +195,7 @@ export const useJobsStore = defineStore('jobs', () => {
     createJob,
     cancelJob,
     retryJob,
+    regenerateJob,
     removeJob,
   }
 })
