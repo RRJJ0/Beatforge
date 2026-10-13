@@ -575,7 +575,7 @@ Rust 會先把 provenance 存入 jobs table 既有的 `result_json`，成功後�
 - [x] 6.5：串接 validation pipeline、工作狀態與 SQLite report。
 - [x] 6.6：建立非破壞式修正流程與 repair manifest。
 - [x] 6.7：計算 difficulty statistics 並呈現結果摘要。
-- [ ] 6.8：完成 osu! 開啟／匯入流程與實體驗收（程式與自動測試完成，待實機驗收）。
+- [x] 6.8：完成 osu! 開啟／匯入流程與 Windows／osu!lazer 實體驗收。
 
 #### 6.1 輸出驗證契約
 
@@ -625,7 +625,7 @@ repair engine 採 deny-by-default，只會移除 UTF-8 BOM、將 CRLF／CR 正�
 
 Jobs UI 對 completed 且具有 validated artifact 的任務提供 **Show validated output** 與 **Import into osu!**。每次操作都會由 Rust 重新讀取 SQLite，要求 job 為 completed、report 可交付、report job identity 一致，並比對 stored output、`validated/<filename>` relative path 與 canonical filesystem path；symlink、`raw`／`working`、外部路徑、非 `.osu`／`.osz` 或已遺失檔案都會拒絕，不信任前端傳入實體路徑。`validation_failed` 且具有 invalid report 的任務另提供帶警告確認的 **Import failed output anyway**；此命令只允許 report 指定、直接位於該 job `raw/` 下的 regular `.osu`／`.osz`，不會把它標記成 validated 或 completed。
 
-Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的執行檔，其次使用偵測到的 stable／lazer executable。手動匯入（包含明確確認的 failed-output import）在找不到 executable 時可交給 Windows `.osu`／`.osz` file association；自動匯入只接受已驗證 executable，不使用 association fallback，並且只在完整 validation 成功後啟動。stable／lazer importer 可能消耗傳入的檔案，因此所有匯入都會先在 application-managed `cache/osu-import` 建立唯一 handoff 副本，只將副本交給 osu!；正式 `validated` 或 `raw` artifact 保持不變，未被 importer 消耗且超過 24 小時的副本會在後續啟動時清理。實機 stable／lazer 驗收清單位於 `docs/testing/stage-6-physical-acceptance.md`；完成該清單前 6.8 維持待驗收狀態。
+Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的執行檔，其次使用偵測到的 stable／lazer executable。手動匯入（包含明確確認的 failed-output import）在找不到 executable 時可交給 Windows `.osu`／`.osz` file association；自動匯入只接受已驗證 executable，不使用 association fallback，並且只在完整 validation 成功後啟動。stable／lazer importer 可能消耗傳入的檔案，因此所有匯入都會先在 application-managed `cache/osu-import` 建立唯一 handoff 副本，只將副本交給 osu!；正式 `validated` 或 `raw` artifact 保持不變，未被 importer 消耗且超過 24 小時的副本會在後續啟動時清理。Windows／osu!lazer 實機驗收已於 2026-10-13 通過；記錄位於 `docs/testing/stage-6-physical-acceptance.md`。
 
 工作項目：
 
@@ -782,6 +782,50 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 - 全新支援環境可由 installer 完成安裝並生成測試譜面。
 - 應用程式更新不會刪除模型、設定或歷史。
 - 使用者可在不暴露歌曲內容的情況下匯出診斷資訊。
+
+### 階段 9：譜面集與媒體內容
+
+目標：讓單次專案能產生完整的 beatmap set，並支援帶有視覺內容的 `.osz`。
+
+規劃子項目：
+
+- [ ] 9.1：同一首歌曲一次建立多個難度，輸出為同一個 beatmap set。
+- [ ] 9.2：允許選擇並封裝背景圖片。
+- [ ] 9.3：允許選擇並封裝背景影片或其他 osu! 支援的影片內容。
+- [ ] 9.4：生成的 `.osz` 使用 `[Artist] - Song name.osz` 格式命名。
+
+#### 9.1 多難度 Beatmap Set
+
+- 讓使用者為同一首歌設定多個目標難度，並建立各自的 difficulty name、生成參數與 seed。
+- 共用音訊、歌曲 metadata、背景與其他 set-level 資源，避免在 `.osz` 中重複封裝。
+- 每個 difficulty 必須分別執行 validation、statistics 與 provenance 紀錄；單一難度失敗時不得默默污染其他難度。
+- 匯出時建立一個包含所有有效 difficulty 的 `.osz`，並在 Jobs／History 顯示整個 set 與各難度狀態。
+
+#### 9.2 背景圖片
+
+- 允許使用者選擇本機圖片作為 beatmap background，並在生成前預覽。
+- 驗證檔案格式、大小、尺寸與安全檔名，再複製至受管理的 job 工作目錄。
+- 將背景引用寫入每個 difficulty 的 `[Events]`，封裝後確認引用資源存在且可由 osu!／lazer 載入。
+
+#### 9.3 背景影片
+
+- 允許使用者選擇本機影片，設定開始時間並封裝至 `.osz`。
+- 驗證格式、檔案大小、時間偏移與資源引用；第一版不自動轉碼或修改原始影片。
+- 顯示影片對輸出大小及匯入時間的影響，並允許在匯出前停用影片。
+
+#### 9.4 `.osz` 輸出命名
+
+- 預設以 beatmap metadata 產生 `[Artist] - Song name.osz`，取代目前偏向 job identity 的檔名。
+- 清理 Windows 不允許的檔名字元、保留名稱、尾端空白與句點，同時避免產生空白或過長檔名。
+- 同名輸出不得靜默覆寫既有檔案，應加入穩定的序號或其他可辨識後綴。
+- job 內部仍使用不可混淆的 identity 管理 `raw`、`validated` 與 provenance；易讀檔名只用於交付與匯入 artifact。
+
+初步驗收條件：
+
+- 同一首歌可匯出至少兩個不同難度，osu!／lazer 將它們辨識為同一個 beatmap set。
+- 所有 difficulty 共用正確的音訊與背景資源，且個別 validation／statistics 可追蹤。
+- 加入圖片或影片後，封裝、重新驗證、重啟還原與匯入流程仍保持非破壞性。
+- 輸出的 `.osz` 使用可辨識的 artist／song name 命名，且特殊字元與同名歌曲不會造成匯出失敗或覆寫。
 
 ## 建議專案結構
 
