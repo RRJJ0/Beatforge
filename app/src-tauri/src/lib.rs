@@ -26,6 +26,7 @@ mod request_adapter;
 mod runtime;
 #[cfg(test)]
 mod stage4_acceptance;
+mod storage;
 pub mod validation;
 mod worker;
 
@@ -849,6 +850,44 @@ fn reset_settings(app: AppHandle, field: Option<String>) -> Result<AppSettings, 
     }
     persist_settings(&connection, &settings)?;
     Ok(settings)
+}
+
+#[tauri::command]
+async fn get_storage_usage(app: AppHandle) -> Result<storage::StorageUsageReport, String> {
+    let (connection, paths) = open_database(&app)?;
+    let active_jobs = jobs::active_ids(&connection)?;
+    tauri::async_runtime::spawn_blocking(move || storage::usage(&paths, &active_jobs))
+        .await
+        .map_err(|error| format!("Storage scan task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn preview_storage_cleanup(
+    app: AppHandle,
+    categories: Vec<storage::StorageCategory>,
+) -> Result<storage::StorageCleanupPreview, String> {
+    let (connection, paths) = open_database(&app)?;
+    let active_jobs = jobs::active_ids(&connection)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        storage::preview_cleanup(&paths, &active_jobs, &categories)
+    })
+    .await
+    .map_err(|error| format!("Storage preview task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn cleanup_storage(
+    app: AppHandle,
+    categories: Vec<storage::StorageCategory>,
+    allow_protected: bool,
+) -> Result<storage::StorageCleanupResult, String> {
+    let (connection, paths) = open_database(&app)?;
+    let active_jobs = jobs::active_ids(&connection)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        storage::cleanup(&paths, &active_jobs, &categories, allow_protected)
+    })
+    .await
+    .map_err(|error| format!("Storage cleanup task failed: {error}"))?
 }
 
 fn next_job_id() -> String {
@@ -1723,6 +1762,9 @@ pub fn run() {
             export_settings,
             preview_settings_import,
             reset_settings,
+            get_storage_usage,
+            preview_storage_cleanup,
+            cleanup_storage,
             create_job,
             list_jobs,
             list_managed_packages,

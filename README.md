@@ -657,7 +657,7 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 - [x] 7.1：建立正式歷史資料檢視、搜尋、篩選與排序。
 - [x] 7.2：完成歷史任務刪除、重新生成與檔案一致性處理。
 - [x] 7.3：建立設定預設值、版本化 migration 與匯入／匯出。
-- [ ] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
+- [x] 7.4：顯示磁碟用量並提供安全的 cache／暫存資料清理。
 - [ ] 7.5：加入桌面通知與背景任務完成／失敗提示。
 - [ ] 7.6：加入輕量音訊、時間軸與物件密度預覽。
 - [ ] 7.7：完成繁體中文／英文介面與 accessibility 改善。
@@ -696,12 +696,14 @@ Windows 匯入會優先使用 Settings 明確選擇且檔名為 `osu!.exe` 的�
 
 #### 7.4 磁碟用量與安全清理
 
-- 統計 runtime、model、cache、logs、jobs raw／working／validated 的用量與最後更新時間。
-- 提供可預覽的清理選項，區分可重新下載 cache、暫存資料、舊 logs 與使用者成果。
-- 清理採 managed-root allowlist，拒絕 symlink、越界路徑、執行中 job 與預設刪除 validated 成果。
-- 清理完成後重新計算用量並回報釋放空間與失敗項目。
+- Settings 的 Storage management 會統計 runtime、models、cache、logs 與所有 job 的 raw／working／validated 分類，顯示 bytes、檔案數及最後更新時間；另外列出目前真正符合清理條件的容量。
+- cache、七天以上的 regular `.log` 與非執行中 job 的 working 目錄為預設候選；runtime 與 models 只能由既有 Models 流程管理，raw 與 validated 視為使用者成果且預設不選。
+- Review cleanup 會重新掃描並按分類顯示 targets、檔案／目錄數與預計釋放容量。raw 或 validated 被明確選取時，仍必須在確認視窗再次勾選成果刪除聲明。
+- Rust 清理端只接受固定 category enum，再由 managed-root allowlist 建立 target；每次刪除前重新 canonicalize 並確認不等於 root、不越界、不含 symlink／特殊檔案。queued、running 與 validating job 的所有 artifact 目錄都會排除。
+- 清理逐一記錄成功與失敗項目，完成後重新掃描並回傳實際移除的 bytes、檔案／目錄數和最新用量；一個 target 失敗不會擴大刪除範圍。
+- Rust 測試涵蓋 preview／cleanup 數量一致、成果預設保留、protected confirmation、active job 排除、七天 log cutoff、symlink 拒絕與完整分類統計。
 
-驗收：預覽數量與實際清理結果一致；清理不影響已安裝模型、執行中任務或使用者未明確選擇的成果。
+驗收：預覽數量與實際清理結果一致；清理不影響已安裝模型、執行中任務或使用者未明確選擇的成果。Rust storage 測試、前端單元測試、type-check、lint 與 production build 通過。
 
 #### 7.5 桌面通知與背景狀態
 

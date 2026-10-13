@@ -284,3 +284,62 @@ export interface SettingsImportPreview {
   items: SettingsImportItem[]
   resultingSettings: AppSettings
 }
+
+export type StorageCategory =
+  'runtime' | 'models' | 'cache' | 'logs' | 'jobsRaw' | 'jobsWorking' | 'jobsValidated'
+
+export interface StorageUsageCategory {
+  category: StorageCategory
+  bytes: number
+  files: number
+  directories: number
+  latestModifiedMs?: number | null
+  cleanable: boolean
+  protected: boolean
+  defaultSelected: boolean
+  eligibleBytes: number
+  eligibleFiles: number
+  eligibleDirectories: number
+  rejectedItems: number
+}
+
+export interface StorageUsageReport {
+  scannedAtMs: number
+  totalBytes: number
+  activeJobs: string[]
+  categories: StorageUsageCategory[]
+  warnings: string[]
+}
+
+export interface StorageCleanupPreviewItem {
+  category: StorageCategory
+  bytes: number
+  files: number
+  directories: number
+  targets: number
+  protected: boolean
+}
+
+export interface StorageCleanupPreview {
+  categories: StorageCleanupPreviewItem[]
+  totalBytes: number
+  totalFiles: number
+  totalDirectories: number
+  protectedSelected: boolean
+  activeJobs: string[]
+  warnings: string[]
+}
+
+export interface StorageCleanupFailure {
+  category: StorageCategory
+  target: string
+  error: string
+}
+
+export interface StorageCleanupResult {
+  freedBytes: number
+  removedFiles: number
+  removedDirectories: number
+  failures: StorageCleanupFailure[]
+  usage: StorageUsageReport
+}

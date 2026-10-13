@@ -4,6 +4,8 @@ import {
   NAlert,
   NButton,
   NCard,
+  NCheckbox,
+  NCheckboxGroup,
   NForm,
   NFormItem,
   NIcon,
@@ -23,12 +25,16 @@ import {
   HardwareChipOutline,
   RefreshOutline,
   SaveOutline,
+  TrashOutline,
 } from '@vicons/ionicons5'
 import {
   isDesktopRuntime,
+  cleanupStorage,
   exportDesktopSettings,
+  getStorageUsage,
   loadDesktopSettings,
   previewDesktopSettingsImport,
+  previewStorageCleanup,
   resetDesktopSettings,
   saveDesktopSettings,
   selectDirectory,
@@ -36,7 +42,14 @@ import {
   selectSettingsImportFile,
 } from '@/services/desktop'
 import { useDesktopStore } from '@/stores/desktop'
-import type { AppSettings, SettingsImportPreview } from '@/types'
+import type {
+  AppSettings,
+  SettingsImportPreview,
+  StorageCategory,
+  StorageCleanupPreview,
+  StorageCleanupResult,
+  StorageUsageReport,
+} from '@/types'
 
 const message = useMessage()
 const desktopStore = useDesktopStore()
@@ -58,7 +71,24 @@ const saving = ref(false)
 const transferring = ref(false)
 const resetField = ref<keyof AppSettings>('outputPath')
 const importPreview = ref<SettingsImportPreview | null>(null)
+const storageUsage = ref<StorageUsageReport | null>(null)
+const storageLoading = ref(false)
+const cleanupSelection = ref<StorageCategory[]>([])
+const cleanupPlanCategories = ref<StorageCategory[]>([])
+const cleanupPreview = ref<StorageCleanupPreview | null>(null)
+const cleanupResult = ref<StorageCleanupResult | null>(null)
+const allowProtectedCleanup = ref(false)
 const gpu = computed(() => desktopStore.system?.gpu)
+
+const storageLabels: Record<StorageCategory, string> = {
+  runtime: 'Runtime',
+  models: 'Models',
+  cache: 'Download cache',
+  logs: 'Old logs',
+  jobsRaw: 'Job raw artifacts',
+  jobsWorking: 'Job working files',
+  jobsValidated: 'Validated results',
+}
 
 function applySettings(settings: AppSettings) {
   outputPath.value = settings.outputPath
@@ -95,6 +125,7 @@ onMounted(async () => {
   } catch (reason) {
     message.error(`Could not load desktop settings: ${String(reason)}`)
   }
+  await refreshStorage(true)
 })
 
 async function runDiagnostics() {
@@ -203,6 +234,77 @@ function importTagType(action: SettingsImportPreview['items'][number]['action'])
   if (action === 'ignored') return 'warning'
   if (action === 'reset') return 'info'
   return 'default'
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unit = units[0]
+  for (let index = 1; value >= 1024 && index < units.length; index += 1) {
+    value /= 1024
+    unit = units[index]
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`
+}
+
+function formatModified(timestamp?: number | null) {
+  return timestamp ? new Date(timestamp).toLocaleString() : 'No files'
+}
+
+async function refreshStorage(resetSelection = false) {
+  if (!isDesktopRuntime()) return
+  storageLoading.value = true
+  try {
+    const usage = await getStorageUsage()
+    storageUsage.value = usage
+    if (resetSelection) {
+      cleanupSelection.value = usage.categories
+        .filter((item) => item.defaultSelected && item.eligibleBytes > 0)
+        .map((item) => item.category)
+    }
+  } catch (reason) {
+    message.error(`Could not scan storage: ${String(reason)}`)
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function reviewStorageCleanup() {
+  if (!cleanupSelection.value.length) return message.info('Select something to clean first.')
+  storageLoading.value = true
+  try {
+    cleanupPlanCategories.value = [...cleanupSelection.value]
+    cleanupPreview.value = await previewStorageCleanup(cleanupPlanCategories.value)
+    allowProtectedCleanup.value = false
+  } catch (reason) {
+    message.error(`Could not preview cleanup: ${String(reason)}`)
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function performStorageCleanup() {
+  if (!cleanupPreview.value) return
+  storageLoading.value = true
+  try {
+    const result = await cleanupStorage(cleanupPlanCategories.value, allowProtectedCleanup.value)
+    storageUsage.value = result.usage
+    cleanupResult.value = result
+    cleanupPreview.value = null
+    cleanupSelection.value = []
+    if (result.failures.length) {
+      message.warning(
+        `Released ${formatBytes(result.freedBytes)}; ${result.failures.length} item(s) could not be removed.`,
+      )
+    } else {
+      message.success(`Cleanup released ${formatBytes(result.freedBytes)}.`)
+    }
+  } catch (reason) {
+    message.error(`Could not clean storage: ${String(reason)}`)
+  } finally {
+    storageLoading.value = false
+  }
 }
 </script>
 
@@ -327,6 +429,79 @@ function importTagType(action: SettingsImportPreview['items'][number]['action'])
             imported manually from the job details.
           </NAlert>
         </NForm>
+      </NCard>
+
+      <NCard class="panel-card storage-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">Storage management</h2>
+            <p class="section-copy">
+              Managed files use
+              <strong>{{ formatBytes(storageUsage?.totalBytes ?? 0) }}</strong> in total.
+            </p>
+          </div>
+          <NButton quaternary circle :loading="storageLoading" @click="refreshStorage(false)">
+            <template #icon><NIcon :component="RefreshOutline" /></template>
+          </NButton>
+        </div>
+        <NAlert v-if="storageUsage?.activeJobs.length" type="warning" :show-icon="false">
+          {{ storageUsage.activeJobs.length }} active job(s) are protected and excluded from
+          cleanup.
+        </NAlert>
+        <NCheckboxGroup v-model:value="cleanupSelection" class="storage-list">
+          <div
+            v-for="item in storageUsage?.categories ?? []"
+            :key="item.category"
+            class="storage-item"
+          >
+            <NCheckbox
+              :value="item.category"
+              :disabled="!item.cleanable || item.eligibleBytes === 0"
+            >
+              <span class="storage-name">
+                {{ storageLabels[item.category] }}
+                <NTag v-if="item.protected" size="tiny" type="warning" round>Result</NTag>
+              </span>
+            </NCheckbox>
+            <strong>{{ formatBytes(item.bytes) }}</strong>
+            <small>
+              {{ item.files }} files · updated {{ formatModified(item.latestModifiedMs) }}
+              <template v-if="item.cleanable">
+                · {{ formatBytes(item.eligibleBytes) }} eligible
+              </template>
+            </small>
+          </div>
+        </NCheckboxGroup>
+        <NAlert v-if="storageUsage?.warnings.length" type="warning" :show-icon="false">
+          {{ storageUsage.warnings.length }} linked, unsupported, or unreadable item(s) were left
+          untouched.
+        </NAlert>
+        <NAlert
+          v-if="cleanupResult"
+          :type="cleanupResult.failures.length ? 'warning' : 'success'"
+          :show-icon="false"
+        >
+          Last cleanup released {{ formatBytes(cleanupResult.freedBytes) }} and removed
+          {{ cleanupResult.removedFiles }} files.
+          <ul v-if="cleanupResult.failures.length" class="cleanup-failures">
+            <li v-for="failure in cleanupResult.failures" :key="failure.target">
+              {{ storageLabels[failure.category] }} · {{ failure.target }} — {{ failure.error }}
+            </li>
+          </ul>
+        </NAlert>
+        <div class="storage-actions">
+          <span>Runtime and models are removed only from the Models screen.</span>
+          <NButton
+            type="warning"
+            secondary
+            :disabled="cleanupSelection.length === 0"
+            :loading="storageLoading"
+            @click="reviewStorageCleanup"
+          >
+            <template #icon><NIcon :component="TrashOutline" /></template>
+            Review cleanup
+          </NButton>
+        </div>
       </NCard>
     </section>
 
@@ -480,6 +655,51 @@ function importTagType(action: SettingsImportPreview['items'][number]['action'])
       </div>
     </NCard>
   </NModal>
+
+  <NModal :show="Boolean(cleanupPreview)" @update:show="(show) => !show && (cleanupPreview = null)">
+    <NCard class="cleanup-preview" :bordered="false" role="dialog" aria-modal="true">
+      <div class="card-heading">
+        <div>
+          <h2 class="section-title">Review storage cleanup</h2>
+          <p class="section-copy">
+            {{ cleanupPreview?.totalFiles ?? 0 }} files and
+            {{ cleanupPreview?.totalDirectories ?? 0 }} directories ·
+            {{ formatBytes(cleanupPreview?.totalBytes ?? 0) }}
+          </p>
+        </div>
+      </div>
+      <div class="cleanup-items">
+        <div v-for="item in cleanupPreview?.categories" :key="item.category">
+          <span>
+            <strong>{{ storageLabels[item.category] }}</strong>
+            <small>{{ item.targets }} managed target(s)</small>
+          </span>
+          <strong>{{ formatBytes(item.bytes) }}</strong>
+        </div>
+      </div>
+      <NAlert v-if="cleanupPreview?.activeJobs.length" type="warning" :show-icon="false">
+        Active job folders were excluded. Their files will not be touched.
+      </NAlert>
+      <NAlert v-if="cleanupPreview?.warnings.length" type="warning" :show-icon="false">
+        {{ cleanupPreview.warnings.join(' ') }}
+      </NAlert>
+      <NCheckbox v-if="cleanupPreview?.protectedSelected" v-model:checked="allowProtectedCleanup">
+        I understand that selected raw or validated results cannot be downloaded again
+        automatically.
+      </NCheckbox>
+      <div class="modal-actions">
+        <NButton @click="cleanupPreview = null">Cancel</NButton>
+        <NButton
+          type="error"
+          :loading="storageLoading"
+          :disabled="cleanupPreview?.protectedSelected && !allowProtectedCleanup"
+          @click="performStorageCleanup"
+        >
+          Clean selected files
+        </NButton>
+      </div>
+    </NCard>
+  </NModal>
 </template>
 
 <style scoped>
@@ -573,6 +793,66 @@ function importTagType(action: SettingsImportPreview['items'][number]['action'])
   width: min(820px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
   overflow: auto;
+}
+.cleanup-preview {
+  width: min(660px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+.storage-list,
+.cleanup-items {
+  display: grid;
+  margin: 12px 0;
+}
+.storage-item {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto;
+  gap: 4px 16px;
+  align-items: center;
+  padding: 11px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.storage-item > small {
+  grid-column: 1 / -1;
+  color: #858da0;
+  font-size: 9px;
+}
+.storage-name {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+.storage-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-top: 14px;
+}
+.storage-actions > span {
+  color: #858da0;
+  font-size: 9px;
+}
+.cleanup-items > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.cleanup-items span strong,
+.cleanup-items span small {
+  display: block;
+}
+.cleanup-items span small {
+  margin-top: 3px;
+  color: #858da0;
+  font-size: 9px;
+}
+.cleanup-failures {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
 }
 .import-items {
   display: grid;

@@ -14,6 +14,10 @@ import type {
   OsuImportLaunch,
   RuntimeInfo,
   SettingsImportPreview,
+  StorageCategory,
+  StorageCleanupPreview,
+  StorageCleanupResult,
+  StorageUsageReport,
   StartJobInput,
   SystemInfo,
   WorkerHealth,
@@ -98,6 +102,18 @@ export async function previewDesktopSettingsImport(path: string) {
 
 export async function resetDesktopSettings(field?: keyof AppSettings) {
   return invoke<AppSettings>('reset_settings', { field: field ?? null })
+}
+
+export async function getStorageUsage() {
+  return invoke<StorageUsageReport>('get_storage_usage')
+}
+
+export async function previewStorageCleanup(categories: StorageCategory[]) {
+  return invoke<StorageCleanupPreview>('preview_storage_cleanup', { categories })
+}
+
+export async function cleanupStorage(categories: StorageCategory[], allowProtected: boolean) {
+  return invoke<StorageCleanupResult>('cleanup_storage', { categories, allowProtected })
 }
 
 export async function createDesktopJob(input: StartJobInput) {

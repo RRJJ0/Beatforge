@@ -167,7 +167,7 @@ pub fn get_input(connection: &Connection, id: &str) -> Result<Option<StartJobInp
 
 pub fn active_ids(connection: &Connection) -> Result<Vec<String>, String> {
     let mut statement = connection
-        .prepare("SELECT id FROM jobs WHERE status IN ('running', 'queued')")
+        .prepare("SELECT id FROM jobs WHERE status IN ('running', 'queued', 'validating')")
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map([], |row| row.get(0))
@@ -419,6 +419,13 @@ mod tests {
             scenario: "hang".into(),
         };
         insert(&connection, "BF-TEST", &input).expect("job is inserted");
+        assert_eq!(active_ids(&connection).unwrap(), vec!["BF-TEST"]);
+        connection
+            .execute(
+                "UPDATE jobs SET status = 'validating' WHERE id = 'BF-TEST'",
+                [],
+            )
+            .unwrap();
         assert_eq!(active_ids(&connection).unwrap(), vec!["BF-TEST"]);
         mark_interrupted(&connection).expect("recovery succeeds");
         assert!(active_ids(&connection).unwrap().is_empty());
