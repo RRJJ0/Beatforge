@@ -19,6 +19,7 @@ import type { BeatmapStatistics, GenerationJob } from '@/types'
 import {
   importDesktopJobOutput,
   importFailedDesktopJobOutput,
+  importUnfilteredDesktopSetOutput,
   revealDesktopJobOutput,
 } from '@/services/desktop'
 
@@ -90,6 +91,19 @@ async function importFailedOutput(jobId: string, errorCount: number) {
   )
 }
 
+function hasExcludedDifficulty(job: GenerationJob) {
+  return job.provenance?.difficulties?.some((item) => item.status === 'validation_failed') ?? false
+}
+
+async function importUnfilteredSet(job: GenerationJob) {
+  const confirmed = window.confirm(t('jobs.importFullSetConfirm'))
+  if (!confirmed) return
+  await runAction(
+    () => importUnfilteredDesktopSetOutput(job.id).then(() => undefined),
+    t('jobs.importFullSetOpened'),
+  )
+}
+
 async function removeJob(job: GenerationJob) {
   const confirmed = window.confirm(
     `Permanently delete ${job.id} and its managed raw, validated, report, log, and temporary files? ` +
@@ -152,7 +166,7 @@ function openPreview(jobId: string) {
           <div class="job-meta">
             <span class="mono">{{ job.id }}</span
             ><span>{{ job.model }}</span
-            ><span>★ {{ job.difficulty.toFixed(1) }}</span
+            ><span>{{ job.difficultyCount && job.difficultyCount > 1 ? `${job.difficultyCount} difficulties` : `★ ${job.difficulty.toFixed(1)}` }}</span
             ><span>{{ job.createdAt }}</span>
           </div>
           <template v-if="['running', 'validating'].includes(job.status)">
@@ -185,6 +199,16 @@ function openPreview(jobId: string) {
             <span v-if="job.provenance.runtime.peak_gpu_memory_mb">
               Peak {{ job.provenance.runtime.peak_gpu_memory_mb.toFixed(0) }} MB
             </span>
+          </div>
+          <div v-if="job.provenance?.difficulties?.length" class="job-validation">
+            <NTag
+              v-for="item in job.provenance.difficulties"
+              :key="item.id"
+              size="small"
+              round
+              :type="['completed', 'validated'].includes(item.status) ? 'success' : 'error'"
+              :title="item.error"
+            >{{ item.name }} · {{ item.status.replaceAll('_', ' ') }}<template v-if="item.statistics"> · {{ objectCount(item.statistics) }} objects</template></NTag>
           </div>
           <div v-if="job.validationReport" class="job-validation">
             <span>{{ job.validationReport.status.replaceAll('_', ' ') }}</span>
@@ -243,6 +267,17 @@ function openPreview(jobId: string) {
             @click="
               runAction(() => importDesktopJobOutput(job.id).then(() => undefined), 'Import opened')
             "
+            ><template #icon><NIcon :component="OpenOutline" /></template
+          ></NButton>
+          <NButton
+            v-if="job.status === 'completed' && hasExcludedDifficulty(job)"
+            secondary
+            circle
+            size="small"
+            type="warning"
+            :title="t('jobs.importFullSet')"
+            :aria-label="t('jobs.importFullSet')"
+            @click="importUnfilteredSet(job)"
             ><template #icon><NIcon :component="OpenOutline" /></template
           ></NButton>
           <NButton

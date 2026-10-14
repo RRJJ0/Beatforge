@@ -398,11 +398,22 @@ fn validate_extracted_integrity(
     let mut reported_references = BTreeSet::new();
     for beatmap_path in &inspection.beatmap_paths {
         let parsed = parse_osu_file(&root.join(Path::new(beatmap_path)), limits);
-        issues.extend(parsed.issues);
+        issues.extend(parsed.issues.into_iter().map(|mut issue| {
+            issue.message = format!("[{beatmap_path}] {}", issue.message);
+            issue
+        }));
         let Some(beatmap) = parsed.beatmap else {
             continue;
         };
-        issues.extend(validate_semantics(&beatmap, SemanticValidationContext::default()).issues);
+        issues.extend(
+            validate_semantics(&beatmap, SemanticValidationContext::default())
+                .issues
+                .into_iter()
+                .map(|mut issue| {
+                    issue.message = format!("[{beatmap_path}] {}", issue.message);
+                    issue
+                }),
+        );
         for (reference, audio, section, line) in referenced_assets(&beatmap) {
             let Some(key) = safe_reference_key(beatmap_path, &reference) else {
                 issues.push(ValidationIssue {

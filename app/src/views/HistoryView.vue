@@ -27,6 +27,7 @@ import { useI18n } from '@/i18n'
 import type { GenerationJob, JobStatus } from '@/types'
 import {
   importDesktopJobOutput,
+  importUnfilteredDesktopSetOutput,
   isDesktopRuntime,
   revealDesktopJobOutput,
 } from '@/services/desktop'
@@ -43,6 +44,16 @@ const message = useMessage()
 const search = ref('')
 const status = ref<'all' | JobStatus>('all')
 const model = ref('all')
+
+function hasExcludedDifficulty(job: GenerationJob) {
+  return job.provenance?.difficulties?.some((item) => item.status === 'validation_failed') ?? false
+}
+
+async function importUnfilteredSet(job: GenerationJob) {
+  const confirmed = window.confirm(t('jobs.importFullSetConfirm'))
+  if (!confirmed) return
+  await runAction(() => importUnfilteredDesktopSetOutput(job.id), t('jobs.importFullSetOpened'))
+}
 const dateRange = ref<HistoryDateRange>('all')
 const sort = ref<HistorySort>('newest')
 const page = ref(1)
@@ -270,7 +281,17 @@ function openPreview(jobId: string) {
               </NTag>
             </div>
             <div>
-              <NTag size="small" round>{{ job.difficulty.toFixed(1) }} ★</NTag>
+              <NTag size="small" round>{{ job.difficultyCount && job.difficultyCount > 1 ? `${job.difficultyCount} difficulties` : `${job.difficulty.toFixed(1)} ★` }}</NTag>
+              <div v-if="job.provenance?.difficulties?.length" class="difficulty-statuses">
+                <NTag
+                  v-for="item in job.provenance.difficulties"
+                  :key="item.id"
+                  size="tiny"
+                  round
+                  :type="['completed', 'validated'].includes(item.status) ? 'success' : 'error'"
+                  :title="item.error"
+                >{{ item.name }}</NTag>
+              </div>
             </div>
             <span class="secondary model-name">{{ job.model }}</span>
             <span class="secondary">{{ formatJobDate(job.createdAt) }}</span>
@@ -305,6 +326,18 @@ function openPreview(jobId: string) {
                 :title="t('jobs.import')"
                 :aria-label="t('jobs.import')"
                 @click="runAction(() => importDesktopJobOutput(job.id), 'Import opened')"
+              >
+                <template #icon><NIcon :component="OpenOutline" /></template>
+              </NButton>
+              <NButton
+                v-if="job.status === 'completed' && hasExcludedDifficulty(job) && isDesktopRuntime()"
+                secondary
+                circle
+                size="small"
+                type="warning"
+                :title="t('jobs.importFullSet')"
+                :aria-label="t('jobs.importFullSet')"
+                @click="importUnfilteredSet(job)"
               >
                 <template #icon><NIcon :component="OpenOutline" /></template>
               </NButton>

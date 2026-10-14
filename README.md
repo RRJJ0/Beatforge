@@ -774,7 +774,7 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 
 規劃子項目：
 
-- [ ] 8.1：同一首歌曲一次建立多個難度，輸出為同一個 beatmap set。
+- [x] 8.1：同一首歌曲一次建立多個難度，輸出為同一個 beatmap set。
 - [ ] 8.2：允許選擇並封裝背景圖片。
 - [ ] 8.3：允許選擇並封裝背景影片或其他 osu! 支援的影片內容。
 - [ ] 8.4：生成的 `.osz` 使用 `[Artist] - Song name.osz` 格式命名。

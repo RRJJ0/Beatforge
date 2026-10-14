@@ -5,12 +5,34 @@ pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DifficultyRequest {
+    pub id: String,
+    pub name: String,
+    pub difficulty: f64,
+    pub seed: u32,
+    #[serde(default)]
+    pub descriptors: Vec<String>,
+    #[serde(default)]
+    pub negative_descriptors: Vec<String>,
+    #[serde(default)]
+    pub approach_rate: Option<f64>,
+    #[serde(default)]
+    pub circle_size: Option<f64>,
+    #[serde(default = "default_true")]
+    pub hitsounded: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartJobInput {
     pub title: String,
     pub artist: String,
     pub audio_file: String,
     pub model: String,
     pub difficulty: f64,
+    /// Empty for requests created before multi-difficulty beatmap sets.
+    #[serde(default)]
+    pub difficulties: Vec<DifficultyRequest>,
     #[serde(default)]
     pub gamemode: u8,
     #[serde(default)]

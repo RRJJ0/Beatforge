@@ -1,4 +1,7 @@
-use crate::{packages, protocol::PROTOCOL_VERSION, protocol::StartJobInput};
+use crate::{
+    packages,
+    protocol::{DifficultyRequest, PROTOCOL_VERSION, StartJobInput},
+};
 use serde::Serialize;
 use std::{
     fs,
@@ -8,6 +11,7 @@ use std::{
 const MAX_DESCRIPTOR_COUNT: usize = 16;
 const MAX_DESCRIPTOR_LENGTH: usize = 64;
 const MAX_SEED: u32 = 65_535;
+const MAX_DIFFICULTIES: usize = 8;
 const REQUIRED_MODEL_FILES: [&str; 4] = [
     "model.safetensors",
     "config.json",
@@ -49,11 +53,14 @@ pub struct ProductionWorkerStartCommand {
     pub reference_beatmap_path: Option<String>,
     pub output_path: String,
     pub config: ProductionInferenceConfig,
+    pub configs: Vec<ProductionInferenceConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProductionInferenceConfig {
     pub config_name: &'static str,
+    pub difficulty_id: String,
+    pub difficulty_name: String,
     pub gamemode: u8,
     pub difficulty: f64,
     pub seed: u32,
@@ -67,6 +74,28 @@ pub struct ProductionInferenceConfig {
     pub device: String,
     pub precision: String,
     pub repair_generated_output: bool,
+}
+
+fn legacy_difficulty(input: &StartJobInput) -> DifficultyRequest {
+    DifficultyRequest {
+        id: "difficulty-1".into(),
+        name: format!("AI {:.1}★", input.difficulty),
+        difficulty: input.difficulty,
+        seed: input.seed,
+        descriptors: input.descriptors.clone(),
+        negative_descriptors: input.negative_descriptors.clone(),
+        approach_rate: input.approach_rate,
+        circle_size: input.circle_size,
+        hitsounded: input.hitsounded,
+    }
+}
+
+fn requested_difficulties(input: &StartJobInput) -> Vec<DifficultyRequest> {
+    if input.difficulties.is_empty() {
+        vec![legacy_difficulty(input)]
+    } else {
+        input.difficulties.clone()
+    }
 }
 
 fn validate_text(value: &str, label: &str) -> Result<(), String> {
@@ -115,36 +144,54 @@ fn validate_rating(value: Option<f64>, label: &str) -> Result<(), String> {
 pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
     validate_text(&input.title, "Title")?;
     validate_text(&input.artist, "Artist")?;
-    if !input.difficulty.is_finite() || !(1.0..=8.0).contains(&input.difficulty) {
-        return Err("Difficulty must be between 1.0 and 8.0".into());
+    let difficulties = requested_difficulties(input);
+    if difficulties.is_empty() || difficulties.len() > MAX_DIFFICULTIES {
+        return Err(format!(
+            "A beatmap set must contain 1 to {MAX_DIFFICULTIES} difficulties"
+        ));
     }
     if input.gamemode != 0 {
         return Err("The MVP currently supports osu!standard (gamemode 0) only".into());
-    }
-    if input.seed > MAX_SEED {
-        return Err(format!("Seed must be between 0 and {MAX_SEED}"));
     }
     if input.model != packages::STANDARD_MODEL_ID {
         return Err(
             "Only the application-managed Mapperatorinator V32 standard model is supported".into(),
         );
     }
-    validate_descriptors(&input.descriptors, "Descriptors")?;
-    validate_descriptors(&input.negative_descriptors, "Negative descriptors")?;
-    let positives = input
-        .descriptors
-        .iter()
-        .map(|value| value.trim().to_lowercase())
-        .collect::<std::collections::HashSet<_>>();
-    if input
-        .negative_descriptors
-        .iter()
-        .any(|value| positives.contains(&value.trim().to_lowercase()))
-    {
-        return Err("A descriptor cannot be both positive and negative".into());
+    let mut ids = std::collections::HashSet::new();
+    let mut names = std::collections::HashSet::new();
+    for difficulty in &difficulties {
+        validate_text(&difficulty.id, "Difficulty id")?;
+        validate_text(&difficulty.name, "Difficulty name")?;
+        if !ids.insert(difficulty.id.trim().to_lowercase()) {
+            return Err("Difficulty ids must be unique".into());
+        }
+        if !names.insert(difficulty.name.trim().to_lowercase()) {
+            return Err("Difficulty names must be unique".into());
+        }
+        if !difficulty.difficulty.is_finite() || !(1.0..=8.0).contains(&difficulty.difficulty) {
+            return Err("Difficulty must be between 1.0 and 8.0".into());
+        }
+        if difficulty.seed > MAX_SEED {
+            return Err(format!("Seed must be between 0 and {MAX_SEED}"));
+        }
+        validate_descriptors(&difficulty.descriptors, "Descriptors")?;
+        validate_descriptors(&difficulty.negative_descriptors, "Negative descriptors")?;
+        let positives = difficulty
+            .descriptors
+            .iter()
+            .map(|value| value.trim().to_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        if difficulty
+            .negative_descriptors
+            .iter()
+            .any(|value| positives.contains(&value.trim().to_lowercase()))
+        {
+            return Err("A descriptor cannot be both positive and negative".into());
+        }
+        validate_rating(difficulty.approach_rate, "Approach rate")?;
+        validate_rating(difficulty.circle_size, "Circle size")?;
     }
-    validate_rating(input.approach_rate, "Approach rate")?;
-    validate_rating(input.circle_size, "Circle size")?;
     validate_input_file(
         Path::new(&input.audio_file),
         "audio",
@@ -258,6 +305,37 @@ pub fn build(
         .map(|path| canonical(Path::new(path), "reference beatmap"))
         .transpose()?;
 
+    let configs = requested_difficulties(input)
+        .into_iter()
+        .map(|difficulty| ProductionInferenceConfig {
+            config_name: "v32",
+            difficulty_id: difficulty.id.trim().into(),
+            difficulty_name: difficulty.name.trim().into(),
+            gamemode: input.gamemode,
+            difficulty: difficulty.difficulty,
+            seed: difficulty.seed,
+            descriptors: difficulty
+                .descriptors
+                .into_iter()
+                .map(|value| value.trim().into())
+                .collect(),
+            negative_descriptors: difficulty
+                .negative_descriptors
+                .into_iter()
+                .map(|value| value.trim().into())
+                .collect(),
+            title: input.title.trim().into(),
+            artist: input.artist.trim().into(),
+            approach_rate: difficulty.approach_rate,
+            circle_size: difficulty.circle_size,
+            hitsounded: difficulty.hitsounded,
+            device: context.device.clone(),
+            precision: context.precision.clone(),
+            repair_generated_output: context.repair_generated_output,
+        })
+        .collect::<Vec<_>>();
+    let config = configs[0].clone();
+
     Ok(ProductionWorkerStartCommand {
         protocol_version: PROTOCOL_VERSION,
         message_type: "start_job",
@@ -272,30 +350,8 @@ pub fn build(
         audio_path: path_string(&audio_path),
         reference_beatmap_path: reference_beatmap_path.as_deref().map(path_string),
         output_path: path_string(&output_path),
-        config: ProductionInferenceConfig {
-            config_name: "v32",
-            gamemode: input.gamemode,
-            difficulty: input.difficulty,
-            seed: input.seed,
-            descriptors: input
-                .descriptors
-                .iter()
-                .map(|value| value.trim().into())
-                .collect(),
-            negative_descriptors: input
-                .negative_descriptors
-                .iter()
-                .map(|value| value.trim().into())
-                .collect(),
-            title: input.title.trim().into(),
-            artist: input.artist.trim().into(),
-            approach_rate: input.approach_rate,
-            circle_size: input.circle_size,
-            hitsounded: input.hitsounded,
-            device: context.device.clone(),
-            precision: context.precision.clone(),
-            repair_generated_output: context.repair_generated_output,
-        },
+        config,
+        configs,
     })
 }
 
@@ -331,6 +387,7 @@ mod tests {
             audio_file: path_string(&audio),
             model: packages::STANDARD_MODEL_ID.into(),
             difficulty: 5.2,
+            difficulties: vec![],
             gamemode: 0,
             seed: 12345,
             descriptors: vec!["skillset/jumps".into()],
@@ -404,6 +461,63 @@ mod tests {
             serde_json::to_value(command).unwrap()["config"]["repair_generated_output"],
             false
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn builds_an_ordered_multi_difficulty_set() {
+        let (root, mut input, context) = fixture();
+        input.difficulties = vec![
+            DifficultyRequest {
+                id: "normal".into(),
+                name: "Normal".into(),
+                difficulty: 2.5,
+                seed: 11,
+                descriptors: vec![],
+                negative_descriptors: vec![],
+                approach_rate: Some(7.0),
+                circle_size: Some(4.0),
+                hitsounded: true,
+            },
+            DifficultyRequest {
+                id: "insane".into(),
+                name: "Insane".into(),
+                difficulty: 6.2,
+                seed: 22,
+                descriptors: vec!["skillset/streams".into()],
+                negative_descriptors: vec![],
+                approach_rate: Some(9.5),
+                circle_size: Some(4.2),
+                hitsounded: false,
+            },
+        ];
+
+        let command = build("BF-set", &input, &context).unwrap();
+
+        assert_eq!(command.configs.len(), 2);
+        assert_eq!(command.config.difficulty_name, "Normal");
+        assert_eq!(command.configs[1].difficulty_id, "insane");
+        assert_eq!(command.configs[1].difficulty, 6.2);
+        assert_eq!(command.configs[1].seed, 22);
+        assert!(!command.configs[1].hitsounded);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_duplicate_difficulty_names() {
+        let (root, mut input, context) = fixture();
+        let first = legacy_difficulty(&input);
+        input.difficulties = vec![
+            first.clone(),
+            DifficultyRequest {
+                id: "other".into(),
+                ..first
+            },
+        ];
+
+        let error = build("BF-set", &input, &context).unwrap_err();
+
+        assert!(error.contains("names must be unique"));
         let _ = fs::remove_dir_all(root);
     }
 

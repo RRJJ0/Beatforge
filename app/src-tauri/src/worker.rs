@@ -418,9 +418,9 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
             false
         }
         WorkerEvent::Completed {
-            output_path,
-            warnings,
-            provenance,
+            mut output_path,
+            mut warnings,
+            mut provenance,
             ..
         } => {
             if active.production && provenance.is_none() {
@@ -431,6 +431,77 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
                     "The production worker completed without a reproducibility record",
                 );
                 return true;
+            }
+            let is_multi_difficulty = provenance
+                .as_ref()
+                .and_then(|value| value.get("difficulties"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|items| items.len() > 1);
+            if is_multi_difficulty {
+                let filtered = build_paths(app).and_then(|paths| {
+                    let job_root = PathBuf::from(paths.jobs).join(&active.id);
+                    crate::validation::filter_invalid_set_difficulties(
+                        &job_root,
+                        Path::new(&output_path),
+                        crate::validation::ValidationLimits::default(),
+                    )
+                });
+                match filtered {
+                    Ok((path, difficulty_results)) => {
+                        output_path = path.to_string_lossy().into_owned();
+                        let excluded_count = difficulty_results
+                            .iter()
+                            .filter(|(_, statistics)| statistics.is_none())
+                            .count();
+                        if let Some(items) = provenance
+                            .as_mut()
+                            .and_then(|value| value.get_mut("difficulties"))
+                            .and_then(serde_json::Value::as_array_mut)
+                        {
+                            for (index, statistics) in &difficulty_results {
+                                if let Some(record) = items.get_mut(index.saturating_sub(1)) {
+                                    if let Some(statistics) = statistics {
+                                        record["status"] = serde_json::json!("validated");
+                                        record["statistics"] = serde_json::to_value(statistics)
+                                            .unwrap_or(serde_json::Value::Null);
+                                    } else {
+                                        record["status"] = serde_json::json!("validation_failed");
+                                        record["error"] = serde_json::json!(
+                                            "Excluded because this difficulty failed output validation"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        if excluded_count > 0 {
+                            warnings.push(format!(
+                                "Excluded {} invalid difficulty(s) from the final beatmap set.",
+                                excluded_count
+                            ));
+                            if let Some(output) = provenance
+                                .as_mut()
+                                .and_then(serde_json::Value::as_object_mut)
+                            {
+                                let file = Path::new(&output_path);
+                                if let Some(original) = output.get("output").cloned() {
+                                    output.insert("unfiltered_output".into(), original);
+                                }
+                                output.insert(
+                                    "output".into(),
+                                    serde_json::json!({
+                                        "name": file.file_name().and_then(|value| value.to_str()).unwrap_or("beatmap-set.osz"),
+                                        "size_bytes": file.metadata().map(|value| value.len()).unwrap_or(0),
+                                        "sha256": crate::downloads::sha256_file(file).unwrap_or_default(),
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        fail_active(app, active, "SET_DIFFICULTY_FILTER_FAILED", &error);
+                        return true;
+                    }
+                }
             }
             if let Some(provenance) = provenance {
                 let saved = open_database(app).and_then(|(connection, _)| {

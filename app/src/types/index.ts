@@ -33,6 +33,14 @@ export interface GenerationProvenance {
   output: Record<string, unknown>
   timing: { started_at: string; completed_at: string; elapsed_seconds: number }
   known_limitations: string[]
+  difficulties?: Array<{
+    id: string
+    name: string
+    status: 'completed' | 'validated' | 'failed' | 'validation_failed'
+    error?: string
+    provenance?: GenerationProvenance
+    statistics?: BeatmapStatistics
+  }>
 }
 
 export type ValidationStatus = 'valid' | 'valid_with_warnings' | 'repaired' | 'invalid'
@@ -108,6 +116,7 @@ export interface GenerationJob {
   audioFile: string
   model: string
   difficulty: number
+  difficultyCount?: number
   status: JobStatus
   progress: number
   stage: string
@@ -121,12 +130,25 @@ export interface GenerationJob {
   validationReport?: ValidationReport | null
 }
 
+export interface DifficultyRequest {
+  id: string
+  name: string
+  difficulty: number
+  seed: number
+  descriptors: string[]
+  negativeDescriptors: string[]
+  approachRate?: number
+  circleSize?: number
+  hitsounded: boolean
+}
+
 export interface StartJobInput {
   title: string
   artist: string
   audioFile: string
   model: string
   difficulty: number
+  difficulties?: DifficultyRequest[]
   gamemode: number
   seed: number
   descriptors: string[]

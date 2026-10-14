@@ -291,6 +291,63 @@ pub fn resolve_failed_artifact(
     Ok(artifact)
 }
 
+pub fn resolve_unfiltered_set_artifact(
+    jobs_root: &Path,
+    job_id: &str,
+    status: &str,
+    provenance: Option<&serde_json::Value>,
+) -> Result<PathBuf, String> {
+    if !valid_job_id(job_id) {
+        return Err("Invalid managed job identity".into());
+    }
+    if status != "completed" {
+        return Err("Only a completed beatmap set can import excluded difficulties".into());
+    }
+    let provenance = provenance.ok_or_else(|| "The job has no provenance record".to_string())?;
+    let has_excluded = provenance
+        .get("difficulties")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("status").and_then(serde_json::Value::as_str) == Some("validation_failed")
+            })
+        });
+    if !has_excluded {
+        return Err("The beatmap set has no validation-failed difficulty to import".into());
+    }
+    let name = provenance
+        .get("unfiltered_output")
+        .and_then(|value| value.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("beatmap-set.osz");
+    if Path::new(name).components().count() != 1 || !name.to_ascii_lowercase().ends_with(".osz") {
+        return Err("The provenance record contains an unsafe unfiltered artifact name".into());
+    }
+    let jobs_root = jobs_root
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the managed jobs directory: {error}"))?;
+    let job_root = jobs_root
+        .join(job_id)
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the managed job directory: {error}"))?;
+    if job_root.parent() != Some(jobs_root.as_path()) {
+        return Err("The job directory escaped the managed jobs directory".into());
+    }
+    let artifact = job_root.join(name);
+    let metadata = fs::symlink_metadata(&artifact)
+        .map_err(|error| format!("Could not inspect the unfiltered beatmap set: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("The unfiltered beatmap set is not a regular managed file".into());
+    }
+    let artifact = artifact
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the unfiltered beatmap set: {error}"))?;
+    if artifact.parent() != Some(job_root.as_path()) {
+        return Err("The unfiltered beatmap set escaped its managed job directory".into());
+    }
+    Ok(artifact)
+}
+
 fn executable_from_path(path: &Path) -> Option<PathBuf> {
     let candidate = if path.is_dir() {
         path.join("osu!.exe")
@@ -533,6 +590,45 @@ mod tests {
         .unwrap();
         assert_eq!(resolved, artifact.canonicalize().unwrap());
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolves_an_unfiltered_multi_difficulty_set_for_explicit_import() {
+        let root = temporary_root("unfiltered-set");
+        let job = root.join("BF-SET");
+        fs::create_dir_all(&job).unwrap();
+        let artifact = job.join("beatmap-set.osz");
+        fs::write(&artifact, b"full set with an invalid difficulty").unwrap();
+        let provenance = serde_json::json!({
+            "difficulties": [
+                {"id": "normal", "status": "validated"},
+                {"id": "insane", "status": "validation_failed"}
+            ]
+        });
+
+        let resolved =
+            resolve_unfiltered_set_artifact(&root, "BF-SET", "completed", Some(&provenance))
+                .unwrap();
+
+        assert_eq!(resolved, artifact.canonicalize().unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unfiltered_set_import_requires_an_excluded_difficulty() {
+        let root = temporary_root("unfiltered-set-reject");
+        let job = root.join("BF-SET");
+        fs::create_dir_all(&job).unwrap();
+        fs::write(job.join("beatmap-set.osz"), b"set").unwrap();
+        let provenance = serde_json::json!({
+            "difficulties": [{"id": "normal", "status": "validated"}]
+        });
+
+        assert!(
+            resolve_unfiltered_set_artifact(&root, "BF-SET", "completed", Some(&provenance),)
+                .is_err()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

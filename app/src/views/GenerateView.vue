@@ -36,18 +36,40 @@ const audioFile = ref('')
 const title = ref('')
 const artist = ref('')
 const model = ref('mapperatorinator-v32-standard')
-const difficulty = ref(4.8)
-const approachRate = ref(9)
-const circleSize = ref(4)
-const generateHitsounds = ref(true)
 const isAdvanced = ref(false)
 const attempted = ref(false)
 const creating = ref(false)
 const scenario = ref('success')
-const seed = ref(Math.floor(Math.random() * 65_536))
-const descriptors = ref<string[]>([])
-const negativeDescriptors = ref<string[]>([])
 const referenceBeatmap = ref('')
+
+interface EditableDifficulty {
+  id: string
+  name: string
+  difficulty: number
+  seed: number
+  descriptors: string[]
+  negativeDescriptors: string[]
+  approachRate: number
+  circleSize: number
+  hitsounded: boolean
+}
+
+let nextDifficultyId = 1
+function makeDifficulty(rating = 4.8): EditableDifficulty {
+  const id = nextDifficultyId++
+  return {
+    id: `difficulty-${id}`,
+    name: `AI ${rating.toFixed(1)}★`,
+    difficulty: rating,
+    seed: Math.floor(Math.random() * 65_536),
+    descriptors: [],
+    negativeDescriptors: [],
+    approachRate: 9,
+    circleSize: 4,
+    hitsounded: true,
+  }
+}
+const difficulties = ref<EditableDifficulty[]>([makeDifficulty()])
 
 const modelOptions = [
   { label: 'Mapperatorinator V32 · osu!standard', value: 'mapperatorinator-v32-standard' },
@@ -61,10 +83,29 @@ const scenarioOptions = [
   { label: 'Simulate malformed protocol message', value: 'malformed' },
 ]
 const canGenerate = computed(() =>
-  Boolean(audioFile.value && title.value.trim() && artist.value.trim()),
+  Boolean(
+    audioFile.value &&
+      title.value.trim() &&
+      artist.value.trim() &&
+      difficulties.value.length > 0 &&
+      difficulties.value.every((item) => item.name.trim()) &&
+      new Set(difficulties.value.map((item) => item.name.trim().toLocaleLowerCase())).size ===
+        difficulties.value.length,
+  ),
 )
 const audioDisplayName = computed(() => audioFile.value.split(/[\\/]/).at(-1) ?? '')
 const referenceDisplayName = computed(() => referenceBeatmap.value.split(/[\\/]/).at(-1) ?? '')
+
+function addDifficulty() {
+  const previous = difficulties.value.at(-1)?.difficulty ?? 3.8
+  difficulties.value.push(makeDifficulty(Math.min(8, Number((previous + 0.8).toFixed(1)))))
+}
+
+function removeDifficulty(id: string) {
+  if (difficulties.value.length > 1) {
+    difficulties.value = difficulties.value.filter((item) => item.id !== id)
+  }
+}
 
 async function chooseAudio() {
   if (!isDesktopRuntime()) {
@@ -95,20 +136,25 @@ async function createJob() {
   }
   creating.value = true
   try {
+    const primary = difficulties.value[0]!
     await jobsStore.createJob({
       title: title.value.trim(),
       artist: artist.value.trim(),
       audioFile: audioFile.value,
       model: model.value,
-      difficulty: difficulty.value,
+      difficulty: primary.difficulty,
+      difficulties: difficulties.value.map((item) => ({
+        ...item,
+        name: item.name.trim(),
+      })),
       gamemode: 0,
-      seed: seed.value,
-      descriptors: descriptors.value,
-      negativeDescriptors: negativeDescriptors.value,
+      seed: primary.seed,
+      descriptors: primary.descriptors,
+      negativeDescriptors: primary.negativeDescriptors,
       referenceBeatmap: referenceBeatmap.value || undefined,
-      approachRate: approachRate.value,
-      circleSize: circleSize.value,
-      hitsounded: generateHitsounds.value,
+      approachRate: primary.approachRate,
+      circleSize: primary.circleSize,
+      hitsounded: primary.hitsounded,
       scenario: scenario.value,
     })
     message.success(t('generate.queued'))
@@ -199,45 +245,51 @@ async function createJob() {
           <NFormItem :label="t('generate.model')"
             ><NSelect v-model:value="model" :options="modelOptions"
           /></NFormItem>
-          <NFormItem :label="t('generate.rating')">
-            <div class="slider-field">
-              <NSlider v-model:value="difficulty" :min="1" :max="8" :step="0.1" /><NInputNumber
-                v-model:value="difficulty"
-                :min="1"
-                :max="8"
-                :step="0.1"
-                size="small"
-              />
+          <div class="difficulty-heading">
+            <strong>{{ t('generate.difficulties') }}</strong>
+            <NButton size="tiny" secondary :disabled="difficulties.length >= 8" @click="addDifficulty">
+              {{ t('generate.addDifficulty') }}
+            </NButton>
+          </div>
+          <div class="difficulty-list">
+            <div v-for="(item, index) in difficulties" :key="item.id" class="difficulty-card">
+              <div class="difficulty-card-heading">
+                <span>{{ t('generate.difficultyNumber', { number: index + 1 }) }}</span>
+                <NButton v-if="difficulties.length > 1" text type="error" size="tiny" @click="removeDifficulty(item.id)">
+                  {{ t('common.remove') }}
+                </NButton>
+              </div>
+              <NFormItem :label="t('generate.difficultyName')">
+                <NInput v-model:value="item.name" maxlength="200" />
+              </NFormItem>
+              <NFormItem :label="t('generate.rating')">
+                <div class="slider-field">
+                  <NSlider v-model:value="item.difficulty" :min="1" :max="8" :step="0.1" />
+                  <NInputNumber v-model:value="item.difficulty" :min="1" :max="8" :step="0.1" size="small" />
+                </div>
+              </NFormItem>
+              <template v-if="isAdvanced">
+                <NFormItem :label="t('generate.seed')">
+                  <NInputNumber v-model:value="item.seed" :min="0" :max="65535" :step="1" />
+                </NFormItem>
+                <NFormItem :label="t('generate.descriptors')"><NDynamicTags v-model:value="item.descriptors" /></NFormItem>
+                <NFormItem :label="t('generate.negative')"><NDynamicTags v-model:value="item.negativeDescriptors" /></NFormItem>
+                <div class="two-column compact">
+                  <NFormItem :label="t('generate.ar')"><NInputNumber v-model:value="item.approachRate" :min="0" :max="10" /></NFormItem>
+                  <NFormItem :label="t('generate.cs')"><NInputNumber v-model:value="item.circleSize" :min="0" :max="10" /></NFormItem>
+                </div>
+                <div class="switch-row nested">
+                  <div><strong>{{ t('generate.hitsounds') }}</strong><small>{{ t('generate.hitsoundsHelp') }}</small></div>
+                  <NSwitch v-model:value="item.hitsounded" :aria-label="t('generate.hitsounds')" />
+                </div>
+              </template>
             </div>
-          </NFormItem>
+          </div>
           <div class="switch-row">
             <div><strong>{{ t('generate.advanced') }}</strong><small>{{ t('generate.advancedHelp') }}</small></div>
             <NSwitch v-model:value="isAdvanced" :aria-label="t('generate.advanced')" />
           </div>
           <template v-if="isAdvanced">
-            <NFormItem :label="t('generate.seed')">
-              <NInputNumber v-model:value="seed" :min="0" :max="65535" :step="1" />
-            </NFormItem>
-            <NFormItem :label="t('generate.descriptors')">
-              <NDynamicTags v-model:value="descriptors" />
-            </NFormItem>
-            <NFormItem :label="t('generate.negative')">
-              <NDynamicTags v-model:value="negativeDescriptors" />
-            </NFormItem>
-            <div class="two-column compact">
-              <NFormItem :label="t('generate.ar')"
-                ><NInputNumber v-model:value="approachRate" :min="0" :max="10"
-              /></NFormItem>
-              <NFormItem :label="t('generate.cs')"
-                ><NInputNumber v-model:value="circleSize" :min="0" :max="10"
-              /></NFormItem>
-            </div>
-            <div class="switch-row">
-              <div>
-                <strong>{{ t('generate.hitsounds') }}</strong><small>{{ t('generate.hitsoundsHelp') }}</small>
-              </div>
-              <NSwitch v-model:value="generateHitsounds" :aria-label="t('generate.hitsounds')" />
-            </div>
             <NFormItem :label="t('generate.scenario')">
               <NSelect v-model:value="scenario" :options="scenarioOptions" />
             </NFormItem>
@@ -327,6 +379,33 @@ async function createJob() {
   gap: 14px;
   align-items: center;
   width: 100%;
+}
+.difficulty-heading,
+.difficulty-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.difficulty-heading {
+  margin-bottom: 10px;
+}
+.difficulty-list {
+  display: grid;
+  gap: 10px;
+}
+.difficulty-card {
+  padding: 12px;
+  border: 1px solid rgba(127, 127, 127, 0.16);
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.025);
+}
+.difficulty-card-heading {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.switch-row.nested {
+  padding-bottom: 2px;
 }
 .switch-row {
   display: flex;

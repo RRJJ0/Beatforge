@@ -33,6 +33,75 @@ fn utc_now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
+/// For a generated multi-difficulty set, remove only members that fail
+/// structural or gameplay validation before the final set-level validation.
+/// The caller records the excluded member ids in provenance.
+pub fn filter_invalid_set_difficulties(
+    job_root: &Path,
+    candidate: &Path,
+    limits: ValidationLimits,
+) -> Result<(PathBuf, Vec<(usize, Option<BeatmapStatistics>)>), String> {
+    let work = job_root.join("set-filter-work");
+    if work.exists() {
+        fs::remove_dir_all(&work)
+            .map_err(|error| format!("Could not reset set validation workspace: {error}"))?;
+    }
+    fs::create_dir(&work)
+        .map_err(|error| format!("Could not create set validation workspace: {error}"))?;
+    let extracted_path = work.join("extracted");
+    let extracted = extract_osz(candidate, &extracted_path, limits);
+    let Some(extracted) = extracted.value else {
+        let _ = fs::remove_dir_all(&work);
+        return Ok((candidate.to_path_buf(), Vec::new()));
+    };
+
+    let mut results = Vec::new();
+    for beatmap_path in &extracted.inspection.beatmap_paths {
+        let index = beatmap_path
+            .strip_prefix("difficulty-")
+            .and_then(|value| value.strip_suffix(".osu"))
+            .and_then(|value| value.parse::<usize>().ok());
+        if let Some(index) = index {
+            results.push((
+                index,
+                calculate_file_statistics(&extracted.root.join(beatmap_path), limits),
+            ));
+        }
+    }
+    let excluded = results
+        .iter()
+        .filter_map(|(index, statistics)| statistics.is_none().then_some(*index))
+        .collect::<Vec<_>>();
+
+    if excluded.is_empty() || excluded.len() == extracted.inspection.beatmap_paths.len() {
+        let _ = fs::remove_dir_all(&work);
+        return Ok((candidate.to_path_buf(), results));
+    }
+    for index in &excluded {
+        fs::remove_file(extracted.root.join(format!("difficulty-{index}.osu")))
+            .map_err(|error| format!("Could not exclude invalid set difficulty: {error}"))?;
+    }
+    let filtered = job_root.join("beatmap-set-filtered.osz");
+    if filtered.exists() {
+        fs::remove_file(&filtered)
+            .map_err(|error| format!("Could not replace filtered beatmap set: {error}"))?;
+    }
+    let packaged = package_osz_from_directory(&extracted.root, &filtered, limits);
+    let _ = fs::remove_dir_all(&work);
+    if packaged.value.is_none() || packaged.has_errors() {
+        let details = packaged
+            .issues
+            .into_iter()
+            .map(|issue| issue.message)
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!(
+            "Could not package valid set difficulties: {details}"
+        ));
+    }
+    Ok((filtered, results))
+}
+
 fn relative_display(directory: &str, name: &str) -> String {
     format!("{directory}/{name}")
 }
@@ -544,6 +613,41 @@ mod tests {
             writer.write_all(bytes).unwrap();
         }
         writer.finish().unwrap();
+    }
+
+    #[test]
+    fn multi_difficulty_filter_excludes_only_invalid_members() {
+        let root = temporary_job("set-filter");
+        let candidate = root.join("beatmap-set.osz");
+        let valid = fs::read(fixture("valid/minimal-standard.osu")).unwrap();
+        let invalid = fs::read(fixture("invalid/invalid-timing.osu")).unwrap();
+        write_osz(
+            &candidate,
+            &[
+                ("difficulty-1.osu", &valid),
+                ("difficulty-2.osu", &invalid),
+                ("fixture.wav", b"audio"),
+            ],
+        );
+
+        let (filtered, results) =
+            filter_invalid_set_difficulties(&root, &candidate, ValidationLimits::default())
+                .unwrap();
+
+        assert_eq!(
+            results
+                .iter()
+                .filter_map(|(index, statistics)| statistics.is_none().then_some(*index))
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert!(results[0].1.is_some());
+        assert_ne!(filtered, candidate);
+        let inspection = crate::validation::inspect_osz(&filtered, ValidationLimits::default())
+            .value
+            .unwrap();
+        assert_eq!(inspection.beatmap_paths, vec!["difficulty-1.osu"]);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

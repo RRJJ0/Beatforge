@@ -787,6 +787,29 @@ fn import_failed_job_output(
     )
 }
 
+#[tauri::command]
+fn import_unfiltered_set_output(
+    app: AppHandle,
+    job_id: String,
+) -> Result<osu_integration::ImportLaunch, String> {
+    let (connection, paths) = open_database(&app)?;
+    let job = jobs::get(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
+    let artifact = osu_integration::resolve_unfiltered_set_artifact(
+        Path::new(&paths.jobs),
+        &job_id,
+        &job.status,
+        job.provenance.as_ref(),
+    )?;
+    let executable = selected_osu_executable(&app)?;
+    osu_integration::import_artifact(
+        &artifact,
+        Path::new(&paths.cache),
+        &job_id,
+        executable.as_deref(),
+        true,
+    )
+}
+
 pub(crate) fn try_auto_import(app: &AppHandle, job_id: &str) -> Result<(), String> {
     let settings = load_settings_value(app)?;
     if !settings.auto_import {
@@ -1858,7 +1881,8 @@ pub fn run() {
             get_job_preview,
             reveal_job_output,
             import_job_output,
-            import_failed_job_output
+            import_failed_job_output,
+            import_unfiltered_set_output
         ])
         .build(tauri::generate_context!())
         .expect("error while building Beatforge");

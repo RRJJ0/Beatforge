@@ -21,11 +21,14 @@ import threading
 import time
 import traceback
 from typing import Any
+import zipfile
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "9"
+WORKER_VERSION = "10"
 MAX_MESSAGE_BYTES = 64 * 1024
+PROGRESS_WINDOW = (0.0, 100.0)
+MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, Any]] = {}
 
 
 def install_generated_group_guard() -> dict[str, int]:
@@ -41,13 +44,18 @@ def install_generated_group_guard() -> dict[str, int]:
     from osuT5.osuT5.dataset import data_utils
     from osuT5.osuT5.inference import postprocessor
 
+    installed_stats = getattr(postprocessor, "_beatforge_guard_stats", None)
+    if isinstance(installed_stats, dict):
+        for key in installed_stats:
+            installed_stats[key] = 0
+        return installed_stats
+
     original_get_groups = postprocessor.get_groups
     stats = {
         "defaulted_non_positive_slider_lengths": 0,
         "defaulted_non_positive_slider_svs": 0,
         "dropped_out_of_order_groups": 0,
     }
-
     original_timing_point_at = postprocessor.Postprocessor.timing_point_at
     original_calc_length = postprocessor.Postprocessor.calc_length
     slider_length_state = {"current_sv": 1.0}
@@ -134,6 +142,7 @@ def install_generated_group_guard() -> dict[str, int]:
         tracked_timing_point_at
     )
     postprocessor.Postprocessor.calc_length = guarded_calc_length
+    postprocessor._beatforge_guard_stats = stats
     return stats
 
 
@@ -225,13 +234,15 @@ def send(payload: dict[str, Any]) -> None:
 
 
 def progress(job_id: str, stage: str, percent: int, message: str) -> None:
+    base, span = PROGRESS_WINDOW
+    mapped_percent = round(base + max(0, min(100, percent)) * span / 100)
     send(
         {
             "type": "progress",
             "protocol_version": PROTOCOL_VERSION,
             "job_id": job_id,
             "stage": stage,
-            "percent": percent,
+            "percent": mapped_percent,
             "message": message,
         }
     )
@@ -635,6 +646,12 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         raise ValueError("start_job requires a config object")
     if config.get("config_name") != "v32" or config.get("gamemode") != 0:
         raise ValueError("Only the pinned V32 osu!standard configuration is supported")
+    difficulty_id = config.get("difficulty_id", "difficulty-1")
+    difficulty_name = config.get("difficulty_name") or f"AI {config.get('difficulty', 0):.1f}★"
+    if not isinstance(difficulty_id, str) or not difficulty_id.strip() or len(difficulty_id) > 200:
+        raise ValueError("difficulty_id is invalid")
+    if not isinstance(difficulty_name, str) or not difficulty_name.strip() or len(difficulty_name) > 200:
+        raise ValueError("difficulty_name is invalid")
     require_number(config.get("difficulty"), "difficulty", 1.0, 8.0)
     seed = config.get("seed")
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 65_535:
@@ -745,7 +762,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         args.artist = config["artist"].strip()
         args.artist_unicode = args.artist
         args.creator = "Beatforge AI"
-        args.version = f"AI {args.difficulty:.1f}★"
+        args.version = difficulty_name.strip()
         args.approach_rate = config.get("approach_rate")
         args.circle_size = config.get("circle_size")
         args.hitsounded = config["hitsounded"]
@@ -781,6 +798,8 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         "config_name": "v32",
         "gamemode": args.gamemode,
         "difficulty": args.difficulty,
+        "difficulty_id": difficulty_id,
+        "difficulty_name": args.version,
         "seed": args.seed,
         "descriptors": json_value(args.descriptors),
         "negative_descriptors": json_value(args.negative_descriptors),
@@ -812,19 +831,31 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     progress(job_id, "loading_model", 20, "Loading the managed V32 model")
     with heartbeat(job_id, "loading_model", 20, "The V32 model is still loading"):
         with contextlib.redirect_stdout(sys.stderr):
-            model, tokenizer = inference.load_model_with_server(
+            model_key = (
                 args.model_path,
-                args.train,
                 args.device,
-                max_batch_size=args.max_batch_size,
-                use_server=False,
-                precision=args.precision,
-                attn_implementation=args.attn_implementation,
-                lora_path=None,
-                gamemode=args.gamemode,
-                auto_select_gamemode_model=False,
-                fast_decoder_loop=args.fast_decoder_loop,
+                args.precision,
+                args.attn_implementation,
+                args.gamemode,
+                args.fast_decoder_loop,
             )
+            cached_model = MODEL_CACHE.get(model_key)
+            if cached_model is None:
+                cached_model = inference.load_model_with_server(
+                    args.model_path,
+                    args.train,
+                    args.device,
+                    max_batch_size=args.max_batch_size,
+                    use_server=False,
+                    precision=args.precision,
+                    attn_implementation=args.attn_implementation,
+                    lora_path=None,
+                    gamemode=args.gamemode,
+                    auto_select_gamemode_model=False,
+                    fast_decoder_loop=args.fast_decoder_loop,
+                )
+                MODEL_CACHE[model_key] = cached_model
+            model, tokenizer = cached_model
             generation_config, beatmap_config = inference.get_config(args)
 
     progress(job_id, "preparing_audio", 45, "Preparing audio and timing context")
@@ -944,39 +975,185 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     return result_path, provenance
 
 
+def merge_difficulty_outputs(
+    output_path: Path,
+    completed: list[tuple[dict[str, Any], Path, dict[str, Any]]],
+) -> Path:
+    """Create one set archive while storing shared assets only once."""
+    destination = output_path / "beatmap-set.osz"
+    members: dict[str, tuple[str, bytes]] = {}
+    for fallback_index, (config, result_path, _provenance) in enumerate(completed, start=1):
+        set_index = config.get("_set_index", fallback_index)
+        if isinstance(set_index, bool) or not isinstance(set_index, int) or set_index < 1:
+            raise RuntimeError("Generated difficulty has an invalid set index")
+        if result_path.suffix.lower() == ".osz":
+            with zipfile.ZipFile(result_path, "r") as archive:
+                files = [entry for entry in archive.infolist() if not entry.is_dir()]
+                osu_files = [entry for entry in files if entry.filename.lower().endswith(".osu")]
+                if len(osu_files) != 1:
+                    raise RuntimeError(
+                        "Each generated difficulty archive must contain exactly one .osu file"
+                    )
+                entries = [(entry.filename, archive.read(entry)) for entry in files]
+        else:
+            entries = [(result_path.name, result_path.read_bytes())]
+
+        for member_name, data in entries:
+            normalized = member_name.replace("\\", "/").strip("/")
+            components = normalized.split("/")
+            if not normalized or any(part in {"", ".", ".."} for part in components):
+                raise RuntimeError("Generated archive contains an unsafe member path")
+            if ":" in components[0]:
+                raise RuntimeError("Generated archive contains an absolute member path")
+            if normalized.lower().endswith(".osu"):
+                member_name = f"difficulty-{set_index}.osu"
+                text = data.decode("utf-8-sig")
+                lines = text.splitlines()
+                version = str(config["difficulty_name"]).strip()
+                replaced = False
+                for line_index, line in enumerate(lines):
+                    if line.startswith("Version:"):
+                        lines[line_index] = f"Version:{version}"
+                        replaced = True
+                        break
+                if not replaced:
+                    raise RuntimeError("Generated beatmap is missing Metadata Version")
+                data = ("\r\n".join(lines) + "\r\n").encode("utf-8")
+            else:
+                member_name = normalized
+
+            key = member_name.casefold()
+            existing = members.get(key)
+            if existing is not None and existing[1] != data:
+                raise RuntimeError(f"Generated difficulties contain conflicting asset: {member_name}")
+            members[key] = (member_name, data)
+
+    if not any(name.endswith(".osu") for name in members):
+        raise RuntimeError("No generated difficulty was available for the beatmap set")
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for _key, (member_name, data) in sorted(members.items()):
+            archive.writestr(member_name, data)
+    return destination.resolve(strict=True)
+
+
+def sanitization_warnings(provenance: dict[str, Any], difficulty_name: str = "") -> list[str]:
+    sanitization = provenance["output_sanitization"]
+    prefix = f"{difficulty_name}: " if difficulty_name else ""
+    warnings = []
+    slider_lengths = sanitization["defaulted_non_positive_slider_lengths"]
+    slider_svs = sanitization["defaulted_non_positive_slider_svs"]
+    out_of_order = sanitization["dropped_out_of_order_groups"]
+    if slider_lengths:
+        warnings.append(
+            f"{prefix}Defaulted {slider_lengths} non-positive generated slider "
+            "length calculation(s) to the current velocity baseline."
+        )
+    if slider_svs:
+        warnings.append(
+            f"{prefix}Defaulted {slider_svs} non-positive generated slider "
+            "velocity value(s) to geometry-based length calculation."
+        )
+    if out_of_order:
+        warnings.append(
+            f"{prefix}Discarded {out_of_order} generated event group(s) whose "
+            "absolute time moved backwards."
+        )
+    return warnings
+
+
 def start_job(command: dict[str, Any]) -> int:
+    global PROGRESS_WINDOW
     job_id = command.get("job_id")
     if not isinstance(job_id, str) or not job_id:
         raise ValueError("start_job requires a job_id")
     try:
-        result_path, provenance = run_inference(command, job_id)
-        defaulted_non_positive_slider_lengths = provenance["output_sanitization"][
-            "defaulted_non_positive_slider_lengths"
-        ]
-        defaulted_non_positive_slider_svs = provenance["output_sanitization"][
-            "defaulted_non_positive_slider_svs"
-        ]
-        dropped_out_of_order_groups = provenance["output_sanitization"][
-            "dropped_out_of_order_groups"
-        ]
-        warnings = []
-        if defaulted_non_positive_slider_lengths:
-            warnings.append(
-                "Defaulted "
-                f"{defaulted_non_positive_slider_lengths} non-positive generated "
-                "slider length calculation(s) to the current velocity baseline."
-            )
-        if defaulted_non_positive_slider_svs:
-            warnings.append(
-                "Defaulted "
-                f"{defaulted_non_positive_slider_svs} non-positive generated "
-                "slider velocity value(s) to geometry-based length calculation."
-            )
-        if dropped_out_of_order_groups:
-            warnings.append(
-                "Discarded "
-                f"{dropped_out_of_order_groups} generated event group(s) "
-                "whose absolute time moved backwards."
+        configs = command.get("configs")
+        if not isinstance(configs, list) or not configs:
+            configs = [command.get("config")]
+        if len(configs) > 8 or any(not isinstance(config, dict) for config in configs):
+            raise ValueError("start_job requires 1 to 8 difficulty configs")
+
+        if len(configs) == 1:
+            result_path, provenance = run_inference(command, job_id)
+            warnings = sanitization_warnings(provenance)
+        else:
+            set_started_at = datetime.now(timezone.utc)
+            set_started = time.perf_counter()
+            output_path = require_path(command.get("output_path"), "output_path", directory=True)
+            completed = []
+            difficulty_records = []
+            warnings = []
+            for index, requested_config in enumerate(configs, start=1):
+                config = dict(requested_config)
+                config["_set_index"] = index
+                difficulty_name = str(config.get("difficulty_name") or f"Difficulty {index}")
+                PROGRESS_WINDOW = ((index - 1) * 90 / len(configs), 90 / len(configs))
+                progress(
+                    job_id,
+                    "generating_set",
+                    2,
+                    f"Generating {difficulty_name} ({index}/{len(configs)})",
+                )
+                difficulty_output = output_path / "difficulties" / f"difficulty-{index}"
+                difficulty_output.mkdir(parents=True, exist_ok=False)
+                difficulty_command = dict(command)
+                difficulty_command.pop("configs", None)
+                difficulty_command["config"] = config
+                difficulty_command["output_path"] = str(difficulty_output)
+                try:
+                    child_path, child_provenance = run_inference(difficulty_command, job_id)
+                    completed.append((config, child_path, child_provenance))
+                    difficulty_records.append(
+                        {
+                            "id": config.get("difficulty_id"),
+                            "name": difficulty_name,
+                            "status": "completed",
+                            "provenance": child_provenance,
+                        }
+                    )
+                    warnings.extend(sanitization_warnings(child_provenance, difficulty_name))
+                except KeyboardInterrupt:
+                    raise
+                except Exception as error:  # noqa: BLE001 - isolate one set member
+                    log(f"Difficulty generation failed ({difficulty_name}): {error}")
+                    traceback.print_exc(file=sys.stderr)
+                    difficulty_records.append(
+                        {
+                            "id": config.get("difficulty_id"),
+                            "name": difficulty_name,
+                            "status": "failed",
+                            "error": str(error),
+                        }
+                    )
+                    warnings.append(f"{difficulty_name}: generation failed and was excluded: {error}")
+
+            PROGRESS_WINDOW = (0.0, 100.0)
+            if not completed:
+                raise RuntimeError("All requested difficulties failed to generate")
+            progress(job_id, "packaging_set", 95, "Packaging valid difficulties into one beatmap set")
+            result_path = merge_difficulty_outputs(output_path, completed)
+            first = completed[0][2]
+            completed_at = datetime.now(timezone.utc)
+            reproducible_inputs = {
+                "source_commit": command.get("source_commit"),
+                "model_version": command.get("model_version"),
+                "worker_version": WORKER_VERSION,
+                "difficulties": [record.get("provenance", {}).get("reproduction_key") for record in difficulty_records],
+            }
+            provenance = dict(first)
+            provenance.update(
+                {
+                    "schema_version": 2,
+                    "reproduction_key": reproduction_key(reproducible_inputs),
+                    "parameters": {"difficulty_count": len(configs)},
+                    "output": file_summary(result_path),
+                    "timing": {
+                        "started_at": set_started_at.isoformat(),
+                        "completed_at": completed_at.isoformat(),
+                        "elapsed_seconds": round(time.perf_counter() - set_started, 3),
+                    },
+                    "difficulties": difficulty_records,
+                }
             )
         send(
             {

@@ -222,6 +222,10 @@ export async function importFailedDesktopJobOutput(jobId: string) {
   return invoke<OsuImportLaunch>('import_failed_job_output', { jobId })
 }
 
+export async function importUnfilteredDesktopSetOutput(jobId: string) {
+  return invoke<OsuImportLaunch>('import_unfiltered_set_output', { jobId })
+}
+
 export async function getDesktopJobPreview(jobId: string) {
   const preview = await invoke<JobPreview>('get_job_preview', { jobId })
   return {

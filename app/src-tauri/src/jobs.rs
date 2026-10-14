@@ -15,6 +15,7 @@ pub struct JobRecord {
     pub audio_file: String,
     pub model: String,
     pub difficulty: f64,
+    pub difficulty_count: usize,
     pub status: String,
     pub progress: u8,
     pub stage: String,
@@ -100,6 +101,11 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
     let output_available = output_path
         .as_deref()
         .is_some_and(|path| Path::new(path).is_file());
+    let difficulty_count = row
+        .get::<_, Option<String>>(15)?
+        .and_then(|value| serde_json::from_str::<StartJobInput>(&value).ok())
+        .map(|input| input.difficulties.len().max(1))
+        .unwrap_or(1);
     Ok(JobRecord {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -107,6 +113,7 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
         audio_file: row.get(3)?,
         model: row.get(4)?,
         difficulty: row.get(5)?,
+        difficulty_count,
         status: row.get(6)?,
         progress: row.get(7)?,
         stage: row.get(8)?,
@@ -120,7 +127,7 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
     })
 }
 
-const SELECT_JOB: &str = "SELECT id, title, artist, audio_file, model, difficulty, status, progress, stage, error_message, output_path, scenario, created_at, result_json, validation_report_json FROM jobs";
+const SELECT_JOB: &str = "SELECT id, title, artist, audio_file, model, difficulty, status, progress, stage, error_message, output_path, scenario, created_at, result_json, validation_report_json, request_json FROM jobs";
 
 pub fn insert(
     connection: &Connection,
@@ -360,6 +367,7 @@ mod tests {
             audio_file: "C:\\Music\\test.mp3".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 4.5,
+            difficulties: vec![],
             gamemode: 0,
             seed: 12345,
             descriptors: vec![],
@@ -416,6 +424,7 @@ mod tests {
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 3.0,
+            difficulties: vec![],
             gamemode: 0,
             seed: 12345,
             descriptors: vec![],
@@ -453,6 +462,7 @@ mod tests {
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 3.0,
+            difficulties: vec![],
             gamemode: 0,
             seed: 12345,
             descriptors: vec![],
@@ -510,6 +520,7 @@ mod tests {
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 4.0,
+            difficulties: vec![],
             gamemode: 0,
             seed: 7,
             descriptors: vec![],
@@ -570,6 +581,7 @@ mod tests {
             audio_file: "C:\\Music\\source.flac".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 5.5,
+            difficulties: vec![],
             gamemode: 0,
             seed: 321,
             descriptors: vec!["streams".into()],
