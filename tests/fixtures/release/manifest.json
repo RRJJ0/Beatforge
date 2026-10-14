@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "description": "Reviewable, project-authored fixtures used by the GPU-free release test baseline.",
+  "fixtureRoots": [
+    "app/src-tauri/tests/fixtures/validation"
+  ],
+  "maxCommittedFixtureBytes": 65536,
+  "allowedExtensions": [
+    ".json",
+    ".md",
+    ".osu"
+  ],
+  "committedFixtures": [
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/README.md",
+      "kind": "documentation",
+      "origin": "project-authored"
+    },
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/hostile/archive-cases.json",
+      "kind": "archive-policy-cases",
+      "origin": "project-authored"
+    },
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/invalid/invalid-slider.osu",
+      "kind": "invalid-beatmap",
+      "origin": "project-authored"
+    },
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/invalid/invalid-timing.osu",
+      "kind": "invalid-beatmap",
+      "origin": "project-authored"
+    },
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/invalid/missing-hitobjects.osu",
+      "kind": "invalid-beatmap",
+      "origin": "project-authored"
+    },
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/invalid/out-of-bounds.osu",
+      "kind": "invalid-beatmap",
+      "origin": "project-authored"
+    },
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/valid/minimal-standard.osu",
+      "kind": "valid-beatmap",
+      "origin": "project-authored"
+    },
+    {
+      "path": "app/src-tauri/tests/fixtures/validation/warnings/incomplete-metadata.osu",
+      "kind": "warning-beatmap",
+      "origin": "project-authored"
+    }
+  ],
+  "generatedFixtures": [
+    {
+      "kind": "audio",
+      "description": "Synthetic bytes or silence created inside a unique test directory."
+    },
+    {
+      "kind": "image-and-video",
+      "description": "Minimal signatures and project-authored payloads created inside a unique test directory."
+    },
+    {
+      "kind": "job-database",
+      "description": "Temporary SQLite databases created by Rust lifecycle and migration tests."
+    }
+  ]
+}

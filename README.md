@@ -822,7 +822,7 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 
 規劃子項目：
 
-- [ ] 9.1：建立發布層級的自動化測試基線與固定測試資料。
+- [x] 9.1：建立發布層級的自動化測試基線與固定測試資料。
 - [ ] 9.2：完成端到端流程、異常復原與長時間穩定性測試。
 - [ ] 9.3：建立隱私安全的診斷匯出與問題回報流程。
 - [ ] 9.4：完成第三方依賴、模型與資料授權盤點。
@@ -839,6 +839,8 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - 對 installer、更新與 GPU 實機無法在一般 CI 執行的案例建立明確的 manual／hardware 標記，不以假通過取代實機驗收。
 
 驗收：單一命令可重跑不需 GPU 的 release test suite；連續執行結果一致，測試結束後不殘留 process、lock 或越界檔案。
+
+實作結果：新增 `scripts/Test-Release.ps1` 作為 GPU-free release gate，依序執行 fixture policy、前端 type-check／唯讀 lint／unit tests／production build、Rust format／Clippy warnings-as-errors／tests，以及 Python worker tests。每次執行將 `TEMP`／`TMP` 導向 `app/.release-test-runs` 下的唯一目錄，結束時還原環境並只清除經路徑與名稱驗證的本次目錄。`tests/fixtures/release/manifest.json` 會完整列舉 committed fixtures，拒絕越界、遺漏、超過 64 KiB、非 allowlist 副檔名及疑似個人絕對路徑；audio、圖片、影片、archive 與 SQLite fixtures 維持由測試在隔離目錄動態建立。自動化範圍、執行方式與明確延後的 manual／hardware gates 記錄於 `docs/testing/stage-9-release-test-baseline.md`。
 
 #### 9.2 端到端與長時間穩定性
 

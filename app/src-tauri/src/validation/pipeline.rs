@@ -18,6 +18,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+type DifficultyStatistics = Vec<(usize, Option<BeatmapStatistics>)>;
+
 fn issue(code: ValidationCode, message: impl Into<String>) -> ValidationIssue {
     ValidationIssue {
         code,
@@ -40,7 +42,7 @@ pub fn filter_invalid_set_difficulties(
     job_root: &Path,
     candidate: &Path,
     limits: ValidationLimits,
-) -> Result<(PathBuf, Vec<(usize, Option<BeatmapStatistics>)>), String> {
+) -> Result<(PathBuf, DifficultyStatistics), String> {
     let work = job_root.join("set-filter-work");
     if work.exists() {
         fs::remove_dir_all(&work)

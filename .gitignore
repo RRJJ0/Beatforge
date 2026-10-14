@@ -37,5 +37,8 @@ __pycache__/
 # Vitest
 __screenshots__/
 
+# Release test isolation
+/app/.release-test-runs/
+
 # Vite
 *.timestamp-*-*.mjs

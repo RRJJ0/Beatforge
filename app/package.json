@@ -9,11 +9,15 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "test:unit": "vitest",
+    "test:unit:run": "vitest --run",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
+    "lint:check": "run-p \"lint:check:*\"",
+    "lint:check:oxlint": "oxlint .",
+    "lint:check:eslint": "eslint .",
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {

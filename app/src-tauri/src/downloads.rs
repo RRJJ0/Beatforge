@@ -311,41 +311,55 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (sender, receiver) = mpsc::channel();
         let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut range_start = None;
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
-                if line == "\r\n" || line.is_empty() {
-                    break;
-                }
-                if let Some(value) = line
-                    .strip_prefix("range: bytes=")
-                    .or_else(|| line.strip_prefix("Range: bytes="))
+            let (mut stream, range_start) = loop {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request_line = String::new();
+                let mut range_start = None;
                 {
-                    range_start = value.trim().trim_end_matches('-').parse().ok();
+                    let mut reader = BufReader::new(&mut stream);
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        if request_line.is_empty() {
+                            request_line.clone_from(&line);
+                        }
+                        if line == "\r\n" || line.is_empty() {
+                            break;
+                        }
+                        if let Some(value) = line
+                            .strip_prefix("range: bytes=")
+                            .or_else(|| line.strip_prefix("Range: bytes="))
+                        {
+                            range_start = value.trim().trim_end_matches('-').parse().ok();
+                        }
+                    }
                 }
-            }
+                if request_line.starts_with("GET /artifact ") {
+                    break (stream, range_start);
+                }
+            };
             let _ = sender.send(range_start);
             let start = range_start.unwrap_or(0) as usize;
             let body = &data[start..];
             let header = if range_start.is_some() {
                 format!(
-                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nConnection: close\r\n\r\n",
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\n\r\n",
                     body.len(),
                     start,
                     data.len() - 1,
                     data.len()
                 )
             } else {
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                )
+                format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len())
             };
             stream.write_all(header.as_bytes()).unwrap();
             stream.write_all(body).unwrap();
+            stream.flush().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let mut buffer = [0_u8; 512];
+            while matches!(stream.read(&mut buffer), Ok(bytes_read) if bytes_read > 0) {}
         });
         (format!("http://{address}/artifact"), receiver, handle)
     }

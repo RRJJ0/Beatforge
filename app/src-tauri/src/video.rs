@@ -23,7 +23,7 @@ fn matches_format(extension: &str, header: &[u8]) -> bool {
         "mp4" => header
             .windows(4)
             .enumerate()
-            .any(|(index, value)| value == b"ftyp" && index >= 4 && index <= 64),
+            .any(|(index, value)| value == b"ftyp" && (4..=64).contains(&index)),
         _ => false,
     }
 }
