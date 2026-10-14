@@ -820,15 +820,88 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 
 目標：在譜面集與媒體內容的基礎結構穩定後，建立可重現、可更新和可支援的 Windows 發布流程。
 
-工作項目：
+規劃子項目：
 
-- 建立單元、整合、端到端與長時間穩定性測試。
-- 測試不同 NVIDIA GPU、顯存與驅動版本。
-- 測試更新、降級、離線啟動和修復流程。
-- 建立簽章、installer 與自動更新。
-- 建立授權清單、第三方 notices 與隱私說明。
-- 檢查 Mapperatorinator 程式、權重、資料與依賴授權。
-- 建立 issue template 與診斷資料回報流程。
+- [ ] 9.1：建立發布層級的自動化測試基線與固定測試資料。
+- [ ] 9.2：完成端到端流程、異常復原與長時間穩定性測試。
+- [ ] 9.3：建立隱私安全的診斷匯出與問題回報流程。
+- [ ] 9.4：完成第三方依賴、模型與資料授權盤點。
+- [ ] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
+- [ ] 9.6：建立自動更新、降級、離線啟動與環境修復流程。
+- [ ] 9.7：建立 NVIDIA GPU、顯存與驅動支援矩陣。
+- [ ] 9.8：建立 release pipeline，並完成 release candidate 實機驗收。
+
+#### 9.1 發布測試基線
+
+- 整理前端、Rust desktop core、Python worker 與 protocol 的單元及整合測試入口，提供一個可重現的完整驗證指令。
+- 建立不含受版權保護歌曲的最小 audio、`.osu`、圖片、影片、job database 與 validation fixtures；測試只使用隔離的 managed roots，不讀寫使用者正式資料。
+- 固定測試 runtime、模型 manifest、資料庫 schema 與設定版本，涵蓋全新安裝及支援中的舊版本 migration。
+- 對 installer、更新與 GPU 實機無法在一般 CI 執行的案例建立明確的 manual／hardware 標記，不以假通過取代實機驗收。
+
+驗收：單一命令可重跑不需 GPU 的 release test suite；連續執行結果一致，測試結束後不殘留 process、lock 或越界檔案。
+
+#### 9.2 端到端與長時間穩定性
+
+- 自動驗證從首次啟動、runtime／model 準備、建立多難度 job、validation、preview 到 osu! handoff 的主要流程。
+- 涵蓋取消、worker crash、timeout、CUDA OOM、validation failure、應用程式重啟、成果遺失與磁碟空間不足等復原情境。
+- 執行多首歌曲連續生成與長時間 soak test，記錄 worker process、GPU／系統記憶體、暫存空間、執行時間與失敗原因。
+- 確認重試或重新啟動不會重複匯入、覆寫成果、污染其他 job，或讓 queue 與 SQLite 狀態分歧。
+
+驗收：主要 E2E 流程可重複通過；長時間測試沒有持續性記憶體／磁碟成長，所有故障都有可理解且可復原的終止狀態。
+
+#### 9.3 診斷匯出與問題回報
+
+- 提供使用者可預覽後匯出的診斷包，包含應用程式版本、OS、GPU／驅動、runtime／model 狀態、設定 schema、job stage、validation 摘要與已清理的近期 logs。
+- 預設排除歌曲、`.osu`／`.osz` 內容、圖片、影片、完整個人路徑、使用者名稱及其他不必要的個人資訊；路徑與自由文字錯誤內容必須經過 redaction。
+- 診斷匯出只讀取 allowlist 內的資料，使用版本化 manifest，並在建立檔案前顯示內容與隱私提醒。
+- 建立 bug／hardware compatibility issue template，要求提供診斷 ID、重現步驟及預期／實際結果，不要求公開歌曲內容。
+
+驗收：診斷包足以判斷常見安裝、GPU、worker 與 validation 問題，且自動化測試確認其中不含歌曲檔案、beatmap 內容或未清理的個人路徑。
+
+#### 9.4 授權與第三方 Notices
+
+- 盤點 Rust crates、npm packages、Python packages、FFmpeg／媒體相關能力，以及 installer／updater 使用的第三方元件與版本。
+- 分別確認 Mapperatorinator 程式碼、模型權重、設定檔、可能涉及的訓練資料聲明與重新散布限制；不能隨 installer 發布的內容改用首次啟動下載。
+- 建立可隨版本重現的 dependency inventory、授權文字、copyright notice、source offer／連結與隱私說明。
+- 將禁止散布、授權不明或 notice 缺失視為 release blocker，不以自動掃描結果取代人工確認。
+
+驗收：installer 與 release artifact 內附完整 Third-party notices；所有實際散布的二進位、模型與資源都有可追蹤的授權依據。
+
+#### 9.5 Windows Installer 與簽章
+
+- 建立正式 Windows installer，定義支援的安裝範圍、捷徑、應用程式資料位置、WebView2／GPU 前置條件與安裝失敗復原。
+- 將大型 runtime 與模型維持在受管理資料目錄，由應用程式驗證後下載或修復，避免每次更新重複打包。
+- 建立 code signing 流程，對 installer、主程式與 updater artifact 簽章並保存 checksum、版本及 build provenance。
+- 測試安裝、重新安裝與解除安裝；解除安裝不得在未明確告知時刪除使用者模型、設定、歷史與生成成果。
+
+驗收：全新支援的 Windows 環境可只透過 installer 啟動 Beatforge 並完成首次設定；檔案簽章與 checksum 可驗證，失敗安裝可安全重試。
+
+#### 9.6 更新、降級、離線啟動與修復
+
+- 建立簽章驗證的更新 manifest、下載、套用、重新啟動與失敗回滾流程；更新前記錄目前版本與必要 migration 狀態。
+- 驗證跨支援版本的 app、settings 與 jobs database migration，確保更新不刪除模型、設定、歷史、raw／validated 成果或匯入快取。
+- 定義可支援的降級範圍；遇到較新 schema 時以唯讀／可理解錯誤停止，不得由舊版直接破壞資料。
+- 無網路時仍可使用已安裝 runtime／model 完成生成；缺少或損壞的元件則提供可重試、可驗證的修復流程。
+
+驗收：正常更新、更新中斷、簽章錯誤、離線啟動、支援範圍內降級與 runtime／model 修復案例通過，使用者資料保持一致。
+
+#### 9.7 GPU 與驅動支援矩陣
+
+- 依實際可取得設備測試不同 NVIDIA GPU 世代、顯存容量、驅動版本、bf16 支援與常見 Windows 組態。
+- 對每個組合記錄能否安裝、模型載入、峰值 VRAM、單難度／多難度生成時間、穩定性與已知限制。
+- 對不支援、顯存不足或驅動過舊的環境提供明確的預檢結果與改善建議，不在推論中途才以不明錯誤失敗。
+- 將最低需求、推薦規格與僅部分驗證的組合分開標示，避免把未測試硬體宣稱為已支援。
+
+驗收：完成至少最低規格、主要開發／推薦規格與一組低顯存情境的實機紀錄；UI 診斷結果與發布文件中的支援矩陣一致。
+
+#### 9.8 Release Pipeline 與候選版驗收
+
+- 建立從乾淨 source revision 產生前端、Rust、worker resources、installer、checksums、notices 與 release notes 的版本化流程。
+- 發布流程執行測試、lint、type-check、Clippy、依賴／授權檢查、artifact smoke test 與簽章驗證，任何必要步驟失敗都停止發布。
+- 建立 release notes、已知問題、支援矩陣、升級／修復說明與 rollback 操作手冊。
+- 使用 release candidate 在全新 Windows 帳號或機器完成安裝、首次設定、生成、validation、預覽、匯入、更新及診斷匯出的最終實機驗收。
+
+驗收：相同 source revision 的發布內容可追蹤且可重建；release candidate 在乾淨環境完成核心流程後，才允許標記正式版本。
 
 交付物：
 
