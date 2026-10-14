@@ -19,7 +19,7 @@ Beatforge desktop core and generation workers communicate over JSON Lines. Each 
 
 `scenario` is part of the phase 3 mock worker only. Supported values are `success`, `failure`, `oom`, `hang`, `crash`, and `malformed`.
 
-Production commands use snake-case protocol fields and contain only adapter-approved absolute paths, the pinned source/model identities, detected GPU metadata, whitelisted difficulty `configs`, and an optional background path staged below the managed job directory. Vue cannot supply a checkpoint or output path.
+Production commands use snake-case protocol fields and contain only adapter-approved absolute paths, the pinned source/model identities, detected GPU metadata, whitelisted difficulty `configs`, and optional background/video paths staged below the managed job directory. A video start time is an integer from 0 to 3,600,000 ms. Vue cannot supply a checkpoint or output path.
 
 ## Progress
 
@@ -30,7 +30,7 @@ Production commands use snake-case protocol fields and contain only adapter-appr
 ## Completed
 
 ```json
-{"type":"completed","protocol_version":1,"job_id":"BF-123","output_path":"C:\\...\\result.osz","warnings":[],"provenance":{"schema_version":1,"job_id":"BF-123","reproduction_key":"sha256...","source":{"mapperatorinator_commit":"0e2b...","worker_version":"11","protocol_version":1},"model":{"package":"mapperatorinator-v32-standard","version":"32..."},"runtime":{"pytorch_version":"2.10.0+cu128","cuda_runtime":"13.0","device":"cuda","precision":"bf16"},"parameters":{"seed":12345,"repair_generated_output":true},"input":{"audio":{"sha256":"..."}},"output":{"sha256":"..."},"timing":{"elapsed_seconds":123.4},"known_limitations":["osu!standard only"],"output_sanitization":{"enabled":true,"defaulted_non_positive_slider_lengths":0,"defaulted_non_positive_slider_svs":0,"dropped_out_of_order_groups":0}}}
+{"type":"completed","protocol_version":1,"job_id":"BF-123","output_path":"C:\\...\\result.osz","warnings":[],"provenance":{"schema_version":1,"job_id":"BF-123","reproduction_key":"sha256...","source":{"mapperatorinator_commit":"0e2b...","worker_version":"12","protocol_version":1},"model":{"package":"mapperatorinator-v32-standard","version":"32..."},"runtime":{"pytorch_version":"2.10.0+cu128","cuda_runtime":"13.0","device":"cuda","precision":"bf16"},"parameters":{"seed":12345,"repair_generated_output":true},"input":{"audio":{"sha256":"..."}},"output":{"sha256":"..."},"timing":{"elapsed_seconds":123.4},"known_limitations":["osu!standard only"],"output_sanitization":{"enabled":true,"defaulted_non_positive_slider_lengths":0,"defaulted_non_positive_slider_svs":0,"dropped_out_of_order_groups":0}}}
 ```
 
 `provenance` is required for the production worker and omitted by the mock worker. Rust stores it in the job's existing `result_json` column before changing the job to `completed`. A missing or unpersistable production record is a terminal protocol failure.

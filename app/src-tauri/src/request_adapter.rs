@@ -2,6 +2,7 @@ use crate::{
     background::inspect_background_image,
     packages,
     protocol::{DifficultyRequest, PROTOCOL_VERSION, StartJobInput},
+    video::{inspect_video, validate_video_start_time},
 };
 use serde::Serialize;
 use std::{
@@ -53,6 +54,8 @@ pub struct ProductionWorkerStartCommand {
     pub audio_path: String,
     pub reference_beatmap_path: Option<String>,
     pub background_image_path: Option<String>,
+    pub video_path: Option<String>,
+    pub video_start_time_ms: i64,
     pub output_path: String,
     pub config: ProductionInferenceConfig,
     pub configs: Vec<ProductionInferenceConfig>,
@@ -205,6 +208,12 @@ pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
     if let Some(path) = input.background_image.as_deref() {
         inspect_background_image(Path::new(path))?;
     }
+    validate_video_start_time(input.video_start_time_ms)?;
+    if let Some(path) = input.video_file.as_deref() {
+        inspect_video(Path::new(path))?;
+    } else if input.video_start_time_ms != 0 {
+        return Err("Video start time requires a selected video".into());
+    }
     if !matches!(
         input.scenario.as_str(),
         "success" | "failure" | "oom" | "hang" | "crash" | "malformed"
@@ -317,7 +326,7 @@ pub fn build(
             let info = inspect_background_image(&source)?;
             let extension = if info.format == "png" { "png" } else { "jpg" };
             let assets = output_path.join("assets");
-            fs::create_dir(&assets).map_err(|error| {
+            fs::create_dir_all(&assets).map_err(|error| {
                 format!("Could not create managed background directory: {error}")
             })?;
             let destination = assets.join(format!("beatforge-background.{extension}"));
@@ -330,6 +339,25 @@ pub fn build(
                 ));
             }
             canonical_managed_child(&destination, &output_path, "staged background image")
+        })
+        .transpose()?;
+    let video_path = input
+        .video_file
+        .as_deref()
+        .map(|path| -> Result<PathBuf, String> {
+            let source = canonical(Path::new(path), "video")?;
+            let info = inspect_video(&source)?;
+            let assets = output_path.join("assets");
+            fs::create_dir_all(&assets)
+                .map_err(|error| format!("Could not create managed video directory: {error}"))?;
+            let destination = assets.join(format!("beatforge-video.{}", info.format));
+            fs::copy(&source, &destination)
+                .map_err(|error| format!("Could not stage video: {error}"))?;
+            if let Err(error) = inspect_video(&destination) {
+                let _ = fs::remove_file(&destination);
+                return Err(format!("Staged video failed verification: {error}"));
+            }
+            canonical_managed_child(&destination, &output_path, "staged video")
         })
         .transpose()?;
 
@@ -378,6 +406,8 @@ pub fn build(
         audio_path: path_string(&audio_path),
         reference_beatmap_path: reference_beatmap_path.as_deref().map(path_string),
         background_image_path: background_image_path.as_deref().map(path_string),
+        video_path: video_path.as_deref().map(path_string),
+        video_start_time_ms: input.video_start_time_ms,
         output_path: path_string(&output_path),
         config,
         configs,
@@ -423,6 +453,8 @@ mod tests {
             negative_descriptors: vec![],
             reference_beatmap: None,
             background_image: None,
+            video_file: None,
+            video_start_time_ms: 0,
             approach_rate: Some(9.0),
             circle_size: Some(4.0),
             hitsounded: true,
@@ -550,6 +582,32 @@ mod tests {
         assert_eq!(staged.file_name().unwrap(), "beatforge-background.png");
         assert!(staged.is_file());
         assert!(staged.starts_with(context.jobs_root.join("BF-background")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validates_and_stages_video_with_a_bounded_start_time() {
+        let (root, mut input, context) = fixture();
+        let background = root.join("cover.png");
+        let mut background_bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        background_bytes.extend_from_slice(&1920_u32.to_be_bytes());
+        background_bytes.extend_from_slice(&1080_u32.to_be_bytes());
+        background_bytes.extend_from_slice(b"\x08\x02\0\0\0crc\0\0\0\0IENDcrc");
+        fs::write(&background, background_bytes).unwrap();
+        let video = root.join("clip.mp4");
+        fs::write(&video, b"\x00\x00\x00\x18ftypisomvideo fixture").unwrap();
+        input.background_image = Some(path_string(&background));
+        input.video_file = Some(path_string(&video));
+        input.video_start_time_ms = 1_250;
+
+        let command = build("BF-video", &input, &context).unwrap();
+        let staged = PathBuf::from(command.video_path.unwrap());
+
+        assert_eq!(staged.file_name().unwrap(), "beatforge-video.mp4");
+        assert_eq!(command.video_start_time_ms, 1_250);
+        assert!(PathBuf::from(command.background_image_path.unwrap()).is_file());
+        assert!(staged.is_file());
+        assert!(staged.starts_with(context.jobs_root.join("BF-video")));
         let _ = fs::remove_dir_all(root);
     }
 

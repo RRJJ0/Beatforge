@@ -155,6 +155,8 @@ export interface StartJobInput {
   negativeDescriptors: string[]
   referenceBeatmap?: string
   backgroundImage?: string
+  videoFile?: string
+  videoStartTimeMs?: number
   approachRate?: number
   circleSize?: number
   hitsounded: boolean
@@ -165,6 +167,11 @@ export interface BackgroundImageInfo {
   path: string
   width: number
   height: number
+  sizeBytes: number
+  format: string
+}
+export interface VideoInfo {
+  path: string
   sizeBytes: number
   format: string
 }

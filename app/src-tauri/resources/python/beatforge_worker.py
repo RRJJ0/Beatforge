@@ -25,7 +25,7 @@ import zipfile
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "11"
+WORKER_VERSION = "12"
 MAX_MESSAGE_BYTES = 64 * 1024
 PROGRESS_WINDOW = (0.0, 100.0)
 MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, Any]] = {}
@@ -616,6 +616,21 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         background_path = require_path(background_value, "background_image_path")
         if background_path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
             raise ValueError("background_image_path must point to a PNG or JPEG file")
+    video_value = command.get("video_path")
+    video_path = None
+    if video_value is not None:
+        video_path = require_path(video_value, "video_path")
+        if video_path.suffix.lower() not in {".avi", ".flv", ".mp4"}:
+            raise ValueError("video_path must point to an AVI, FLV, or MP4 file")
+    video_start_time_ms = command.get("video_start_time_ms", 0)
+    if (
+        isinstance(video_start_time_ms, bool)
+        or not isinstance(video_start_time_ms, int)
+        or not 0 <= video_start_time_ms <= 3_600_000
+    ):
+        raise ValueError("video_start_time_ms must be an integer from 0 to 3600000")
+    if video_path is None and video_start_time_ms != 0:
+        raise ValueError("video_start_time_ms requires video_path")
 
     started_at = datetime.now(timezone.utc)
     started = time.perf_counter()
@@ -627,6 +642,12 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         "background_image": file_summary(background_path)
         if background_path is not None
         else None,
+        "video": (
+            command.get("_video_file_summary") or file_summary(video_path)
+            if video_path is not None
+            else None
+        ),
+        "video_start_time_ms": video_start_time_ms,
     }
 
     if not (source_path / "inference.py").is_file() or not (
@@ -1011,10 +1032,39 @@ def set_background_reference(data: bytes, member_name: str) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
 
+def set_video_reference(data: bytes, member_name: str, start_time_ms: int) -> bytes:
+    text = data.decode("utf-8-sig")
+    lines = text.splitlines()
+    lines = [
+        line
+        for line in lines
+        if not line.strip().lower().startswith(("1,", "video,"))
+    ]
+    event_line = f'Video,{start_time_ms},"{member_name}",0,0'
+    try:
+        events_index = next(
+            index for index, line in enumerate(lines) if line.strip() == "[Events]"
+        )
+        lines.insert(events_index + 1, event_line)
+    except StopIteration:
+        insertion = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if line.strip() == "[TimingPoints]"
+            ),
+            len(lines),
+        )
+        lines[insertion:insertion] = ["[Events]", event_line, ""]
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
 def merge_difficulty_outputs(
     output_path: Path,
     completed: list[tuple[dict[str, Any], Path, dict[str, Any]]],
     background_path: Path | None = None,
+    video_path: Path | None = None,
+    video_start_time_ms: int = 0,
 ) -> Path:
     """Create one set archive while storing shared assets only once."""
     destination = output_path / "beatmap-set.osz"
@@ -1058,6 +1108,8 @@ def merge_difficulty_outputs(
                 data = ("\r\n".join(lines) + "\r\n").encode("utf-8")
                 if background_path is not None:
                     data = set_background_reference(data, background_path.name)
+                if video_path is not None:
+                    data = set_video_reference(data, video_path.name, video_start_time_ms)
             else:
                 member_name = normalized
 
@@ -1075,11 +1127,16 @@ def merge_difficulty_outputs(
             raise RuntimeError("Generated archive already contains a conflicting background asset")
         members[background_name.casefold()] = (background_name, background_data)
 
+    if video_path is not None and video_path.name.casefold() in members:
+        raise RuntimeError("Generated archive already contains a conflicting video asset")
+
     if not any(name.endswith(".osu") for name in members):
         raise RuntimeError("No generated difficulty was available for the beatmap set")
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for _key, (member_name, data) in sorted(members.items()):
             archive.writestr(member_name, data)
+        if video_path is not None:
+            archive.write(video_path, video_path.name, compress_type=zipfile.ZIP_STORED)
     return destination.resolve(strict=True)
 
 
@@ -1124,18 +1181,35 @@ def start_job(command: dict[str, Any]) -> int:
             result_path, provenance = run_inference(command, job_id)
             warnings = sanitization_warnings(provenance)
             background_value = command.get("background_image_path")
-            if background_value is not None:
-                background_path = require_path(background_value, "background_image_path")
+            video_value = command.get("video_path")
+            if background_value is not None or video_value is not None:
+                background_path = (
+                    require_path(background_value, "background_image_path")
+                    if background_value is not None
+                    else None
+                )
+                video_path = (
+                    require_path(video_value, "video_path")
+                    if video_value is not None
+                    else None
+                )
                 result_path = merge_difficulty_outputs(
                     require_path(command.get("output_path"), "output_path", directory=True),
                     [(configs[0], result_path, provenance)],
                     background_path,
+                    video_path,
+                    command.get("video_start_time_ms", 0),
                 )
                 provenance["output"] = file_summary(result_path)
         else:
             set_started_at = datetime.now(timezone.utc)
             set_started = time.perf_counter()
             output_path = require_path(command.get("output_path"), "output_path", directory=True)
+            shared_video_summary = None
+            if command.get("video_path") is not None:
+                shared_video_summary = file_summary(
+                    require_path(command.get("video_path"), "video_path")
+                )
             completed = []
             difficulty_records = []
             warnings = []
@@ -1156,6 +1230,8 @@ def start_job(command: dict[str, Any]) -> int:
                 difficulty_command.pop("configs", None)
                 difficulty_command["config"] = config
                 difficulty_command["output_path"] = str(difficulty_output)
+                if shared_video_summary is not None:
+                    difficulty_command["_video_file_summary"] = shared_video_summary
                 try:
                     child_path, child_provenance = run_inference(difficulty_command, job_id)
                     completed.append((config, child_path, child_provenance))
@@ -1193,7 +1269,19 @@ def start_job(command: dict[str, Any]) -> int:
                 if background_value is not None
                 else None
             )
-            result_path = merge_difficulty_outputs(output_path, completed, background_path)
+            video_value = command.get("video_path")
+            video_path = (
+                require_path(video_value, "video_path")
+                if video_value is not None
+                else None
+            )
+            result_path = merge_difficulty_outputs(
+                output_path,
+                completed,
+                background_path,
+                video_path,
+                command.get("video_start_time_ms", 0),
+            )
             first = completed[0][2]
             completed_at = datetime.now(timezone.utc)
             reproducible_inputs = {

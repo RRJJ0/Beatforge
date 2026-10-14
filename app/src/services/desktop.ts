@@ -22,6 +22,7 @@ import type {
   StorageUsageReport,
   StartJobInput,
   SystemInfo,
+  VideoInfo,
   WorkerHealth,
 } from '@/types'
 
@@ -62,6 +63,20 @@ export async function selectBackgroundImage(): Promise<string | null> {
 export async function authorizeBackgroundPreview(path: string) {
   const info = await invoke<BackgroundImageInfo>('authorize_background_preview', { path })
   return { ...info, url: convertFileSrc(info.path) }
+}
+
+export async function selectVideoFile(): Promise<string | null> {
+  if (!isDesktopRuntime()) return null
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: 'Beatmap video', extensions: ['avi', 'flv', 'mp4'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function inspectBeatmapVideo(path: string) {
+  return invoke<VideoInfo>('inspect_beatmap_video', { path })
 }
 
 export async function selectDirectory(defaultPath?: string): Promise<string | null> {

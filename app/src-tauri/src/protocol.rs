@@ -46,6 +46,10 @@ pub struct StartJobInput {
     #[serde(default)]
     pub background_image: Option<String>,
     #[serde(default)]
+    pub video_file: Option<String>,
+    #[serde(default)]
+    pub video_start_time_ms: i64,
+    #[serde(default)]
     pub approach_rate: Option<f64>,
     #[serde(default)]
     pub circle_size: Option<f64>,

@@ -30,6 +30,7 @@ mod runtime;
 mod stage4_acceptance;
 mod storage;
 pub mod validation;
+mod video;
 mod worker;
 
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -744,6 +745,11 @@ fn authorize_background_preview(
         .allow_file(&info.path)
         .map_err(|error| format!("Could not authorize background preview: {error}"))?;
     Ok(info)
+}
+
+#[tauri::command]
+fn inspect_beatmap_video(path: String) -> Result<video::VideoInfo, String> {
+    video::inspect_video(Path::new(&path))
 }
 
 fn selected_osu_executable(app: &AppHandle) -> Result<Option<PathBuf>, String> {
@@ -1893,6 +1899,7 @@ pub fn run() {
             delete_job,
             get_job_preview,
             authorize_background_preview,
+            inspect_beatmap_video,
             reveal_job_output,
             import_job_output,
             import_failed_job_output,

@@ -24,14 +24,17 @@ import {
   MusicalNotesOutline,
   PlayOutline,
   SparklesOutline,
+  VideocamOutline,
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
 import {
   authorizeBackgroundPreview,
+  inspectBeatmapVideo,
   isDesktopRuntime,
   selectAudioFile,
   selectBackgroundImage,
   selectBeatmapFile,
+  selectVideoFile,
 } from '@/services/desktop'
 import { useI18n } from '@/i18n'
 
@@ -50,6 +53,9 @@ const scenario = ref('success')
 const referenceBeatmap = ref('')
 const backgroundImage = ref('')
 const backgroundPreview = ref<{ url: string; width: number; height: number; sizeBytes: number } | null>(null)
+const videoFile = ref('')
+const videoInfo = ref<{ sizeBytes: number; format: string } | null>(null)
+const videoStartTimeMs = ref<number | null>(0)
 
 interface EditableDifficulty {
   id: string
@@ -158,6 +164,28 @@ function clearBackgroundImage() {
   backgroundPreview.value = null
 }
 
+async function chooseVideo() {
+  if (!isDesktopRuntime()) {
+    message.info(t('generate.pickDesktop'))
+    return
+  }
+  const selected = await selectVideoFile()
+  if (!selected) return
+  try {
+    const info = await inspectBeatmapVideo(selected)
+    videoFile.value = info.path
+    videoInfo.value = info
+  } catch (reason) {
+    message.error(t('generate.videoFailed', { error: String(reason) }))
+  }
+}
+
+function clearVideo() {
+  videoFile.value = ''
+  videoInfo.value = null
+  videoStartTimeMs.value = 0
+}
+
 async function createJob() {
   attempted.value = true
   if (!canGenerate.value) {
@@ -183,6 +211,8 @@ async function createJob() {
       negativeDescriptors: primary.negativeDescriptors,
       referenceBeatmap: referenceBeatmap.value || undefined,
       backgroundImage: backgroundImage.value || undefined,
+      videoFile: videoFile.value || undefined,
+      videoStartTimeMs: videoStartTimeMs.value ?? 0,
       approachRate: primary.approachRate,
       circleSize: primary.circleSize,
       hitsounded: primary.hitsounded,
@@ -250,6 +280,36 @@ async function createJob() {
             <NButton secondary @click="chooseBackgroundImage">
               <template #icon><NIcon :component="ImageOutline" /></template>
               {{ backgroundImage ? t('common.change') : t('generate.chooseImage') }}
+            </NButton>
+          </div>
+        </div>
+        <div class="video-row">
+          <div>
+            <strong>{{ t('generate.video') }}</strong>
+            <small v-if="videoInfo">
+              {{ videoFile.split(/[\\/]/).at(-1) }} · {{ videoInfo.format.toUpperCase() }} ·
+              {{ (videoInfo.sizeBytes / 1024 / 1024).toFixed(1) }} MB
+            </small>
+            <small v-else>{{ t('generate.videoHelp') }}</small>
+          </div>
+          <div class="video-actions">
+            <div v-if="videoFile" class="video-time">
+              <small>{{ t('generate.videoStartTime') }}</small>
+              <NInputNumber
+                v-model:value="videoStartTimeMs"
+                class="video-start-input"
+                :min="0"
+                :max="3600000"
+                :step="100"
+                :precision="0"
+              >
+                <template #suffix>ms</template>
+              </NInputNumber>
+            </div>
+            <NButton v-if="videoFile" text size="small" @click="clearVideo">{{ t('common.remove') }}</NButton>
+            <NButton secondary @click="chooseVideo">
+              <template #icon><NIcon :component="VideocamOutline" /></template>
+              {{ videoFile ? t('common.change') : t('generate.chooseVideo') }}
             </NButton>
           </div>
         </div>
@@ -532,6 +592,37 @@ async function createJob() {
   height: 54px;
   object-fit: cover;
   border-radius: 7px;
+}
+.video-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.video-row strong,
+.video-row small {
+  display: block;
+}
+.video-row small {
+  margin-top: 4px;
+  color: #858da0;
+  font-size: 10px;
+}
+.video-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+}
+.video-time small {
+  margin: 0 0 3px;
+}
+.video-start-input {
+  width: 160px;
 }
 .reference-row strong,
 .reference-row small {
