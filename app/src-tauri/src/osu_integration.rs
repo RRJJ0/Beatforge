@@ -6,15 +6,14 @@ use serde::Serialize;
 use std::{
     fs,
     fs::OpenOptions,
+    io,
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 const IMPORT_HANDOFF_DIRECTORY: &str = "osu-import";
 const IMPORT_HANDOFF_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-static IMPORT_HANDOFF_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,28 +74,53 @@ fn create_import_handoff(
     }
 
     let handoff_root = import_handoff_root(cache_root)?;
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = IMPORT_HANDOFF_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let name = format!("{job_id}-{timestamp}-{sequence}.{extension}");
-    let destination = handoff_root.join(name);
-    let staging = destination.with_extension(format!("{extension}.partial"));
+    let stem = artifact
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "The import artifact filename is invalid".to_string())?;
+    let mut destination = None;
+    for ordinal in 1..=10_000 {
+        let name = if ordinal == 1 {
+            format!("{stem}.{extension}")
+        } else {
+            format!("{stem} ({ordinal}).{extension}")
+        };
+        let candidate = handoff_root.join(name);
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut output) => {
+                let copy_result = (|| {
+                    let mut input = fs::File::open(artifact).map_err(|error| {
+                        format!("Could not read the osu! import artifact: {error}")
+                    })?;
+                    io::copy(&mut input, &mut output).map_err(|error| {
+                        format!("Could not copy the osu! import handoff: {error}")
+                    })?;
+                    output.sync_all().map_err(|error| {
+                        format!("Could not flush the osu! import handoff: {error}")
+                    })
+                })();
+                if let Err(error) = copy_result {
+                    drop(output);
+                    let _ = fs::remove_file(&candidate);
+                    return Err(error);
+                }
+                destination = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!("Could not create the osu! import handoff: {error}"));
+            }
+        }
+    }
+    let destination = destination
+        .ok_or_else(|| "Could not allocate a unique osu! import handoff name".to_string())?;
 
     let copy_result = (|| {
-        fs::copy(artifact, &staging)
-            .map_err(|error| format!("Could not copy the osu! import handoff: {error}"))?;
-        let staged = OpenOptions::new()
-            .write(true)
-            .open(&staging)
-            .map_err(|error| format!("Could not open the osu! import handoff: {error}"))?;
-        staged
-            .sync_all()
-            .map_err(|error| format!("Could not flush the osu! import handoff: {error}"))?;
-        drop(staged);
-        fs::rename(&staging, &destination)
-            .map_err(|error| format!("Could not publish the osu! import handoff: {error}"))?;
         let copied = fs::symlink_metadata(&destination)
             .map_err(|error| format!("Could not inspect the osu! import handoff: {error}"))?;
         if !copied.is_file() || copied.file_type().is_symlink() || copied.len() != metadata.len() {
@@ -111,7 +135,6 @@ fn create_import_handoff(
         Ok(destination)
     })();
     if copy_result.is_err() {
-        let _ = fs::remove_file(&staging);
         let _ = fs::remove_file(&destination);
     }
     copy_result
@@ -706,8 +729,11 @@ mod tests {
         fs::write(&validated, b"validated beatmap").unwrap();
 
         let handoff = create_import_handoff(&cache, "BF-TEST", &validated).unwrap();
+        let second = create_import_handoff(&cache, "BF-TEST", &validated).unwrap();
         assert!(validated.is_file());
         assert_eq!(fs::read(&validated).unwrap(), fs::read(&handoff).unwrap());
+        assert_eq!(handoff.file_name().unwrap(), "validated.osz");
+        assert_eq!(second.file_name().unwrap(), "validated (2).osz");
         assert_eq!(
             handoff.parent().unwrap(),
             cache.join(IMPORT_HANDOFF_DIRECTORY).canonicalize().unwrap()
@@ -716,9 +742,10 @@ mod tests {
 
         assert_eq!(
             cleanup_import_handoffs_older_than(&cache, Duration::ZERO).unwrap(),
-            1
+            2
         );
         assert!(!handoff.exists());
+        assert!(!second.exists());
         assert!(validated.is_file());
         assert_eq!(fs::read(&validated).unwrap(), b"validated beatmap");
 

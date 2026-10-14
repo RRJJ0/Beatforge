@@ -10,6 +10,7 @@ use std::{
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager};
 
+mod artifact_name;
 mod background;
 mod downloads;
 mod environment;

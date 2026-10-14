@@ -17,7 +17,9 @@ pub use archive::{
     package_osz_from_directory,
 };
 pub use limits::ValidationLimits;
-pub use pipeline::{filter_invalid_set_difficulties, validate_candidate};
+pub use pipeline::{
+    filter_invalid_set_difficulties, validate_candidate, validate_candidate_with_delivery_name,
+};
 pub use repair::{OsuRepairResult, normalize_osu_bytes, repair_extracted_archive};
 pub use statistics::{
     aggregate_statistics, calculate_archive_statistics, calculate_beatmap_statistics,

@@ -468,11 +468,41 @@ pub fn validate_candidate(
     worker_warnings: &[String],
     limits: ValidationLimits,
 ) -> Result<ValidationReport, String> {
+    validate_candidate_with_delivery_name(
+        job_id,
+        job_root,
+        candidate,
+        worker_warnings,
+        limits,
+        None,
+    )
+}
+
+pub fn validate_candidate_with_delivery_name(
+    job_id: &str,
+    job_root: &Path,
+    candidate: &Path,
+    worker_warnings: &[String],
+    limits: ValidationLimits,
+    delivery_osz_name: Option<&str>,
+) -> Result<ValidationReport, String> {
     let started_at = utc_now();
     let preserved = preserve_candidate(job_root, candidate);
     let (name, mut artifact) = match preserved {
         Ok((path, name)) => {
-            let artifact = validate_and_repair(job_root, &path, &name, limits)?;
+            let validated_name = if path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("osz"))
+            {
+                delivery_osz_name.unwrap_or(&name)
+            } else {
+                &name
+            };
+            if !crate::artifact_name::is_safe_osz_name(validated_name) && validated_name != name {
+                return Err("The requested delivery artifact name is unsafe".into());
+            }
+            let artifact = validate_and_repair(job_root, &path, validated_name, limits)?;
             (name, artifact)
         }
         Err(error) => (
@@ -713,6 +743,37 @@ mod tests {
 
         assert!(report.can_complete());
         assert_eq!(report.statistics.unwrap().beatmap_count, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn osz_delivery_name_does_not_change_the_raw_identity() {
+        let root = temporary_job("delivery-name");
+        let candidate = root.join("beatmap-set.osz");
+        let map = fs::read(fixture("valid/minimal-standard.osu")).unwrap();
+        write_osz(
+            &candidate,
+            &[("difficulty-1.osu", &map), ("fixture.wav", b"audio")],
+        );
+
+        let report = validate_candidate_with_delivery_name(
+            "BF-DELIVERY",
+            &root,
+            &candidate,
+            &[],
+            ValidationLimits::default(),
+            Some("9Lana - RASEN.osz"),
+        )
+        .unwrap();
+
+        assert!(report.can_complete());
+        assert_eq!(report.source_path, "raw/beatmap-set.osz");
+        assert_eq!(
+            report.validated_path.as_deref(),
+            Some("validated/9Lana - RASEN.osz")
+        );
+        assert!(root.join("raw/beatmap-set.osz").is_file());
+        assert!(root.join("validated/9Lana - RASEN.osz").is_file());
         fs::remove_dir_all(root).unwrap();
     }
 

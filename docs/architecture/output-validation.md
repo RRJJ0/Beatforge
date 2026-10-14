@@ -28,6 +28,8 @@ Phase 6.4 uses the pinned Rust `zip` crate with only stored/deflate entries enab
 
 Extraction only creates a previously absent direct child of an existing parent. Entry paths are reconstructed from validated normal components, files use create-new semantics, and an extraction failure removes the directory created by that operation. After extraction, every beatmap passes the phase 6.2 parser and phase 6.3 semantic validator. A case-insensitive archive-relative index verifies `AudioFilename`, background/video/sample events, and custom hit-sample references without allowing references to traverse out of the archive.
 
+The immutable `raw` artifact keeps the worker's internal filename. After an `.osz` passes validation, its delivery copy is named from the request metadata as `Artist - Song name.osz`. Windows-forbidden characters, reserved device names, trailing spaces and periods, and overlong UTF-16 names are normalized before publication. Import handoffs use create-new semantics and add a stable numeric suffix such as ` (2)` when the readable name already exists, so an earlier artifact is never overwritten.
+
 Packaging recursively inventories a trusted source directory without following links, applies the same limits and case-collision rules, and refuses to overwrite an output. Files are written in stable order to a sibling partial file. The finished ZIP is streamed again for CRC and byte-limit verification, atomically renamed, inspected again, and extracted into a disposable verification directory so parser, semantics, and resource references are rechecked. Any failure removes the candidate output and operation-owned staging data.
 
 ## State transition

@@ -86,6 +86,7 @@ impl WorkerManager {
 
 struct ActiveWorker {
     id: String,
+    delivery_name: String,
     child: Child,
     stdin: Option<ChildStdin>,
     events: Receiver<Result<WorkerEvent, String>>,
@@ -262,6 +263,7 @@ fn update_job(
 fn spawn_worker(app: &AppHandle, id: String, input: StartJobInput) -> Result<ActiveWorker, String> {
     let paths = build_paths(app)?;
     let production = input.scenario == "success";
+    let delivery_name = crate::artifact_name::delivery_osz_name(&input.artist, &input.title);
     let (mut command, start_line, timeout) = if production {
         let python = crate::installed_python(app)?.ok_or_else(|| {
             "Install the private Python runtime before starting inference".to_string()
@@ -350,6 +352,7 @@ fn spawn_worker(app: &AppHandle, id: String, input: StartJobInput) -> Result<Act
     );
     Ok(ActiveWorker {
         id,
+        delivery_name,
         child,
         stdin: Some(stdin),
         events,
@@ -529,12 +532,13 @@ fn process_event(app: &AppHandle, active: &mut ActiveWorker, event: WorkerEvent)
             );
             let validation = build_paths(app).and_then(|paths| {
                 let job_root = PathBuf::from(paths.jobs).join(&active.id);
-                crate::validation::validate_candidate(
+                crate::validation::validate_candidate_with_delivery_name(
                     &active.id,
                     &job_root,
                     Path::new(&output_path),
                     &warnings,
                     crate::validation::ValidationLimits::default(),
+                    Some(&active.delivery_name),
                 )
                 .map(|report| (job_root, report))
             });

@@ -777,7 +777,7 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - [x] 8.1：同一首歌曲一次建立多個難度，輸出為同一個 beatmap set。
 - [x] 8.2：允許選擇並封裝背景圖片。
 - [x] 8.3：允許選擇並封裝背景影片或其他 osu! 支援的影片內容。
-- [ ] 8.4：生成的 `.osz` 使用 `[Artist] - Song name.osz` 格式命名。
+- [x] 8.4：生成的 `.osz` 使用 `[Artist] - Song name.osz` 格式命名。
 
 #### 8.1 多難度 Beatmap Set
 
@@ -806,6 +806,8 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - 清理 Windows 不允許的檔名字元、保留名稱、尾端空白與句點，同時避免產生空白或過長檔名。
 - 同名輸出不得靜默覆寫既有檔案，應加入穩定的序號或其他可辨識後綴。
 - job 內部仍使用不可混淆的 identity 管理 `raw`、`validated` 與 provenance；易讀檔名只用於交付與匯入 artifact。
+
+實作結果：worker 原始產物仍以內部名稱保存於 `raw`；只有通過驗證的 `.osz` 會以 `Artist - Song name.osz` 發布至該 job 的 `validated` 目錄。命名會替換 Windows 禁止字元、處理裝置保留名稱、移除尾端空白／句點，並以 UTF-16 長度限制同時保留 artist 與 title。匯入 handoff 保留易讀名稱，若快取中已有同名檔案則依序使用 ` (2)`、` (3)`，絕不覆寫既有檔案。
 
 初步驗收條件：
 
