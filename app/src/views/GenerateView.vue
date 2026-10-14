@@ -20,12 +20,19 @@ import {
 import {
   CloudUploadOutline,
   DocumentAttachOutline,
+  ImageOutline,
   MusicalNotesOutline,
   PlayOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
-import { isDesktopRuntime, selectAudioFile, selectBeatmapFile } from '@/services/desktop'
+import {
+  authorizeBackgroundPreview,
+  isDesktopRuntime,
+  selectAudioFile,
+  selectBackgroundImage,
+  selectBeatmapFile,
+} from '@/services/desktop'
 import { useI18n } from '@/i18n'
 
 const router = useRouter()
@@ -41,6 +48,8 @@ const attempted = ref(false)
 const creating = ref(false)
 const scenario = ref('success')
 const referenceBeatmap = ref('')
+const backgroundImage = ref('')
+const backgroundPreview = ref<{ url: string; width: number; height: number; sizeBytes: number } | null>(null)
 
 interface EditableDifficulty {
   id: string
@@ -128,6 +137,27 @@ async function chooseReferenceBeatmap() {
   if (selected) referenceBeatmap.value = selected
 }
 
+async function chooseBackgroundImage() {
+  if (!isDesktopRuntime()) {
+    message.info(t('generate.pickDesktop'))
+    return
+  }
+  const selected = await selectBackgroundImage()
+  if (!selected) return
+  try {
+    const preview = await authorizeBackgroundPreview(selected)
+    backgroundImage.value = preview.path
+    backgroundPreview.value = preview
+  } catch (reason) {
+    message.error(t('generate.backgroundFailed', { error: String(reason) }))
+  }
+}
+
+function clearBackgroundImage() {
+  backgroundImage.value = ''
+  backgroundPreview.value = null
+}
+
 async function createJob() {
   attempted.value = true
   if (!canGenerate.value) {
@@ -152,6 +182,7 @@ async function createJob() {
       descriptors: primary.descriptors,
       negativeDescriptors: primary.negativeDescriptors,
       referenceBeatmap: referenceBeatmap.value || undefined,
+      backgroundImage: backgroundImage.value || undefined,
       approachRate: primary.approachRate,
       circleSize: primary.circleSize,
       hitsounded: primary.hitsounded,
@@ -201,6 +232,26 @@ async function createJob() {
             <template #icon><NIcon :component="DocumentAttachOutline" /></template>
             {{ referenceBeatmap ? t('common.change') : t('generate.chooseOsu') }}
           </NButton>
+        </div>
+        <div class="background-row">
+          <div v-if="backgroundPreview" class="background-preview">
+            <img :src="backgroundPreview.url" :alt="t('generate.backgroundPreview')" />
+            <div>
+              <strong>{{ t('generate.background') }}</strong>
+              <small>{{ backgroundPreview.width }}×{{ backgroundPreview.height }} · {{ (backgroundPreview.sizeBytes / 1024 / 1024).toFixed(1) }} MB</small>
+            </div>
+          </div>
+          <div v-else>
+            <strong>{{ t('generate.background') }}</strong>
+            <small>{{ t('generate.backgroundHelp') }}</small>
+          </div>
+          <div class="background-actions">
+            <NButton v-if="backgroundImage" text size="small" @click="clearBackgroundImage">{{ t('common.remove') }}</NButton>
+            <NButton secondary @click="chooseBackgroundImage">
+              <template #icon><NIcon :component="ImageOutline" /></template>
+              {{ backgroundImage ? t('common.change') : t('generate.chooseImage') }}
+            </NButton>
+          </div>
         </div>
       </NCard>
 
@@ -451,6 +502,36 @@ async function createJob() {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.background-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.background-row strong,
+.background-row small {
+  display: block;
+}
+.background-row small {
+  margin-top: 4px;
+  color: #858da0;
+  font-size: 10px;
+}
+.background-preview,
+.background-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.background-preview img {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 7px;
 }
 .reference-row strong,
 .reference-row small {

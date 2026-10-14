@@ -651,6 +651,39 @@ mod tests {
     }
 
     #[test]
+    fn packaged_background_reference_is_validated_as_a_shared_asset() {
+        let root = temporary_job("background");
+        let candidate = root.join("beatmap-set.osz");
+        let map = fs::read_to_string(fixture("valid/minimal-standard.osu"))
+            .unwrap()
+            .replace(
+                "//Background and Video events",
+                "//Background and Video events\n0,0,\"beatforge-background.jpg\",0,0",
+            );
+        write_osz(
+            &candidate,
+            &[
+                ("difficulty-1.osu", map.as_bytes()),
+                ("fixture.wav", b"audio"),
+                ("beatforge-background.jpg", b"background"),
+            ],
+        );
+
+        let report = validate_candidate(
+            "BF-BACKGROUND",
+            &root,
+            &candidate,
+            &[],
+            ValidationLimits::default(),
+        )
+        .unwrap();
+
+        assert!(report.can_complete());
+        assert_eq!(report.statistics.unwrap().beatmap_count, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn valid_candidate_is_preserved_reported_and_published() {
         let root = temporary_job("valid");
         let candidate = root.join("generated.osu");

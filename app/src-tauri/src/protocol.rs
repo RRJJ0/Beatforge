@@ -44,6 +44,8 @@ pub struct StartJobInput {
     #[serde(default)]
     pub reference_beatmap: Option<String>,
     #[serde(default)]
+    pub background_image: Option<String>,
+    #[serde(default)]
     pub approach_rate: Option<f64>,
     #[serde(default)]
     pub circle_size: Option<f64>,

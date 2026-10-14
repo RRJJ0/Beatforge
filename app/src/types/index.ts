@@ -154,10 +154,19 @@ export interface StartJobInput {
   descriptors: string[]
   negativeDescriptors: string[]
   referenceBeatmap?: string
+  backgroundImage?: string
   approachRate?: number
   circleSize?: number
   hitsounded: boolean
   scenario: string
+}
+
+export interface BackgroundImageInfo {
+  path: string
+  width: number
+  height: number
+  sizeBytes: number
+  format: string
 }
 export type PackageKind = 'runtime' | 'model'
 export type PackageStatus =

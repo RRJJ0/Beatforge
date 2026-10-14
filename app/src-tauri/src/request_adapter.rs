@@ -1,4 +1,5 @@
 use crate::{
+    background::inspect_background_image,
     packages,
     protocol::{DifficultyRequest, PROTOCOL_VERSION, StartJobInput},
 };
@@ -51,6 +52,7 @@ pub struct ProductionWorkerStartCommand {
     pub driver_version: Option<String>,
     pub audio_path: String,
     pub reference_beatmap_path: Option<String>,
+    pub background_image_path: Option<String>,
     pub output_path: String,
     pub config: ProductionInferenceConfig,
     pub configs: Vec<ProductionInferenceConfig>,
@@ -200,6 +202,9 @@ pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
     if let Some(path) = input.reference_beatmap.as_deref() {
         validate_input_file(Path::new(path), "reference beatmap", &["osu"])?;
     }
+    if let Some(path) = input.background_image.as_deref() {
+        inspect_background_image(Path::new(path))?;
+    }
     if !matches!(
         input.scenario.as_str(),
         "success" | "failure" | "oom" | "hang" | "crash" | "malformed"
@@ -304,6 +309,29 @@ pub fn build(
         .as_deref()
         .map(|path| canonical(Path::new(path), "reference beatmap"))
         .transpose()?;
+    let background_image_path = input
+        .background_image
+        .as_deref()
+        .map(|path| -> Result<PathBuf, String> {
+            let source = canonical(Path::new(path), "background image")?;
+            let info = inspect_background_image(&source)?;
+            let extension = if info.format == "png" { "png" } else { "jpg" };
+            let assets = output_path.join("assets");
+            fs::create_dir(&assets).map_err(|error| {
+                format!("Could not create managed background directory: {error}")
+            })?;
+            let destination = assets.join(format!("beatforge-background.{extension}"));
+            fs::copy(&source, &destination)
+                .map_err(|error| format!("Could not stage background image: {error}"))?;
+            if let Err(error) = inspect_background_image(&destination) {
+                let _ = fs::remove_file(&destination);
+                return Err(format!(
+                    "Staged background image failed verification: {error}"
+                ));
+            }
+            canonical_managed_child(&destination, &output_path, "staged background image")
+        })
+        .transpose()?;
 
     let configs = requested_difficulties(input)
         .into_iter()
@@ -349,6 +377,7 @@ pub fn build(
         driver_version: context.driver_version.clone(),
         audio_path: path_string(&audio_path),
         reference_beatmap_path: reference_beatmap_path.as_deref().map(path_string),
+        background_image_path: background_image_path.as_deref().map(path_string),
         output_path: path_string(&output_path),
         config,
         configs,
@@ -393,6 +422,7 @@ mod tests {
             descriptors: vec!["skillset/jumps".into()],
             negative_descriptors: vec![],
             reference_beatmap: None,
+            background_image: None,
             approach_rate: Some(9.0),
             circle_size: Some(4.0),
             hitsounded: true,
@@ -500,6 +530,26 @@ mod tests {
         assert_eq!(command.configs[1].difficulty, 6.2);
         assert_eq!(command.configs[1].seed, 22);
         assert!(!command.configs[1].hitsounded);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validates_and_stages_a_background_under_the_job_root() {
+        let (root, mut input, context) = fixture();
+        let background = root.join("cover.png");
+        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        bytes.extend_from_slice(&1920_u32.to_be_bytes());
+        bytes.extend_from_slice(&1080_u32.to_be_bytes());
+        bytes.extend_from_slice(b"\x08\x02\0\0\0crc\0\0\0\0IENDcrc");
+        fs::write(&background, bytes).unwrap();
+        input.background_image = Some(path_string(&background));
+
+        let command = build("BF-background", &input, &context).unwrap();
+        let staged = PathBuf::from(command.background_image_path.unwrap());
+
+        assert_eq!(staged.file_name().unwrap(), "beatforge-background.png");
+        assert!(staged.is_file());
+        assert!(staged.starts_with(context.jobs_root.join("BF-background")));
         let _ = fs::remove_dir_all(root);
     }
 

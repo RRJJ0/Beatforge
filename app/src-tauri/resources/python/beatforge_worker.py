@@ -25,7 +25,7 @@ import zipfile
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "10"
+WORKER_VERSION = "11"
 MAX_MESSAGE_BYTES = 64 * 1024
 PROGRESS_WINDOW = (0.0, 100.0)
 MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, Any]] = {}
@@ -610,6 +610,12 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         reference_path = require_path(reference_value, "reference_beatmap_path")
         if reference_path.suffix.lower() != ".osu":
             raise ValueError("reference_beatmap_path must point to an .osu file")
+    background_value = command.get("background_image_path")
+    background_path = None
+    if background_value is not None:
+        background_path = require_path(background_value, "background_image_path")
+        if background_path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+            raise ValueError("background_image_path must point to a PNG or JPEG file")
 
     started_at = datetime.now(timezone.utc)
     started = time.perf_counter()
@@ -617,6 +623,9 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         "audio": file_summary(audio_path),
         "reference_beatmap": file_summary(reference_path)
         if reference_value is not None
+        else None,
+        "background_image": file_summary(background_path)
+        if background_path is not None
         else None,
     }
 
@@ -975,9 +984,37 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     return result_path, provenance
 
 
+def set_background_reference(data: bytes, member_name: str) -> bytes:
+    text = data.decode("utf-8-sig")
+    lines = text.splitlines()
+    lines = [
+        line
+        for line in lines
+        if not line.strip().startswith(("0,0,", "Background,0,"))
+    ]
+    event_line = f'0,0,"{member_name}",0,0'
+    try:
+        events_index = next(
+            index for index, line in enumerate(lines) if line.strip() == "[Events]"
+        )
+        lines.insert(events_index + 1, event_line)
+    except StopIteration:
+        insertion = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if line.strip() == "[TimingPoints]"
+            ),
+            len(lines),
+        )
+        lines[insertion:insertion] = ["[Events]", event_line, ""]
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
 def merge_difficulty_outputs(
     output_path: Path,
     completed: list[tuple[dict[str, Any], Path, dict[str, Any]]],
+    background_path: Path | None = None,
 ) -> Path:
     """Create one set archive while storing shared assets only once."""
     destination = output_path / "beatmap-set.osz"
@@ -1019,6 +1056,8 @@ def merge_difficulty_outputs(
                 if not replaced:
                     raise RuntimeError("Generated beatmap is missing Metadata Version")
                 data = ("\r\n".join(lines) + "\r\n").encode("utf-8")
+                if background_path is not None:
+                    data = set_background_reference(data, background_path.name)
             else:
                 member_name = normalized
 
@@ -1027,6 +1066,14 @@ def merge_difficulty_outputs(
             if existing is not None and existing[1] != data:
                 raise RuntimeError(f"Generated difficulties contain conflicting asset: {member_name}")
             members[key] = (member_name, data)
+
+    if background_path is not None:
+        background_name = background_path.name
+        background_data = background_path.read_bytes()
+        existing = members.get(background_name.casefold())
+        if existing is not None and existing[1] != background_data:
+            raise RuntimeError("Generated archive already contains a conflicting background asset")
+        members[background_name.casefold()] = (background_name, background_data)
 
     if not any(name.endswith(".osu") for name in members):
         raise RuntimeError("No generated difficulty was available for the beatmap set")
@@ -1076,6 +1123,15 @@ def start_job(command: dict[str, Any]) -> int:
         if len(configs) == 1:
             result_path, provenance = run_inference(command, job_id)
             warnings = sanitization_warnings(provenance)
+            background_value = command.get("background_image_path")
+            if background_value is not None:
+                background_path = require_path(background_value, "background_image_path")
+                result_path = merge_difficulty_outputs(
+                    require_path(command.get("output_path"), "output_path", directory=True),
+                    [(configs[0], result_path, provenance)],
+                    background_path,
+                )
+                provenance["output"] = file_summary(result_path)
         else:
             set_started_at = datetime.now(timezone.utc)
             set_started = time.perf_counter()
@@ -1131,7 +1187,13 @@ def start_job(command: dict[str, Any]) -> int:
             if not completed:
                 raise RuntimeError("All requested difficulties failed to generate")
             progress(job_id, "packaging_set", 95, "Packaging valid difficulties into one beatmap set")
-            result_path = merge_difficulty_outputs(output_path, completed)
+            background_value = command.get("background_image_path")
+            background_path = (
+                require_path(background_value, "background_image_path")
+                if background_value is not None
+                else None
+            )
+            result_path = merge_difficulty_outputs(output_path, completed, background_path)
             first = completed[0][2]
             completed_at = datetime.now(timezone.utc)
             reproducible_inputs = {

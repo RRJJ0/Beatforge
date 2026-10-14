@@ -4,6 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import type {
   AppPaths,
   AppSettings,
+  BackgroundImageInfo,
   ComputeBackend,
   EnvironmentDiagnostics,
   EnvironmentInstallEvent,
@@ -46,6 +47,21 @@ export async function selectBeatmapFile(): Promise<string | null> {
     filters: [{ name: 'osu! beatmap', extensions: ['osu'] }],
   })
   return typeof selected === 'string' ? selected : null
+}
+
+export async function selectBackgroundImage(): Promise<string | null> {
+  if (!isDesktopRuntime()) return null
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: 'Background image', extensions: ['png', 'jpg', 'jpeg'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function authorizeBackgroundPreview(path: string) {
+  const info = await invoke<BackgroundImageInfo>('authorize_background_preview', { path })
+  return { ...info, url: convertFileSrc(info.path) }
 }
 
 export async function selectDirectory(defaultPath?: string): Promise<string | null> {

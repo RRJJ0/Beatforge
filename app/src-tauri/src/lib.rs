@@ -10,6 +10,7 @@ use std::{
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager};
 
+mod background;
 mod downloads;
 mod environment;
 mod formal_worker;
@@ -731,6 +732,18 @@ fn get_job_preview(app: AppHandle, job_id: String) -> Result<preview::JobPreview
         max_waveform_points: 320,
         difficulties,
     })
+}
+
+#[tauri::command]
+fn authorize_background_preview(
+    app: AppHandle,
+    path: String,
+) -> Result<background::BackgroundImageInfo, String> {
+    let info = background::inspect_background_image(Path::new(&path))?;
+    app.asset_protocol_scope()
+        .allow_file(&info.path)
+        .map_err(|error| format!("Could not authorize background preview: {error}"))?;
+    Ok(info)
 }
 
 fn selected_osu_executable(app: &AppHandle) -> Result<Option<PathBuf>, String> {
@@ -1879,6 +1892,7 @@ pub fn run() {
             regenerate_job,
             delete_job,
             get_job_preview,
+            authorize_background_preview,
             reveal_job_output,
             import_job_output,
             import_failed_job_output,
