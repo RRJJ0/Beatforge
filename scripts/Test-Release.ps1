@@ -88,6 +88,9 @@ try {
     Invoke-ReleaseStep 'Third-party license policy' {
         & (Join-Path $PSScriptRoot 'Test-ThirdPartyLicenses.ps1')
     }
+    Invoke-ReleaseStep 'Windows installer policy' {
+        & (Join-Path $PSScriptRoot 'Test-WindowsInstaller.ps1')
+    }
 
     Push-Location $appRoot
     try {

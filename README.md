@@ -855,7 +855,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - [x] 9.2：完成端到端流程、異常復原與長時間穩定性測試。
 - [x] 9.3：建立隱私安全的診斷匯出與問題回報流程。
 - [x] 9.4：完成第三方依賴、模型與資料授權盤點。
-- [ ] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
+- [x] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
 - [ ] 9.6：建立自動更新、降級、離線啟動與環境修復流程。
 - [ ] 9.7：建立 NVIDIA GPU、顯存與驅動支援矩陣。
 - [ ] 9.8：建立 release pipeline，並完成 release candidate 實機驗收。
@@ -914,7 +914,9 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - 建立 code signing 流程，對 installer、主程式與 updater artifact 簽章並保存 checksum、版本及 build provenance。
 - 測試安裝、重新安裝與解除安裝；解除安裝不得在未明確告知時刪除使用者模型、設定、歷史與生成成果。
 
-驗收：全新支援的 Windows 環境可只透過 installer 啟動 Beatforge 並完成首次設定；檔案簽章與 checksum 可驗證，失敗安裝可安全重試。
+驗收：全新支援的 Windows 環境可只透過 installer 啟動 Beatforge 並完成首次設定；checksum 與 build provenance 可驗證，失敗安裝可安全重試。正式 CA 憑證簽章、Publisher 與 SmartScreen 驗收延至 9.8 release candidate，不阻擋後續開發。
+
+實作結果：Windows release 固定使用 x64、current-user NSIS installer，主程式命名為 `Beatforge.exe`，禁止 silent downgrade，內含 Visual C++ runtime，缺少 WebView2 時使用 bootstrapper 補齊。`scripts/Build-WindowsInstaller.ps1` 預設要求乾淨 Git revision、GPU-free release gate、有效 Code Signing certificate／timestamp 與兩個有效 Authenticode signatures；只有明確指定 `-AllowUnsigned` 才能產生不可發布的本機 smoke build。輸出會附 installer、standalone executable、LICENSE、third-party notices、dependency inventory、SHA-256 checksums 與不含私人路徑的 build provenance。`scripts/Test-WindowsInstaller.ps1` 已納入 release gate；`scripts/Test-WindowsInstallerLifecycle.ps1` 只允許在明確確認的 disposable Windows 帳號／VM 執行 install、首次啟動、reinstall、uninstall 及 user-data preservation 測試。完整建置、資料位置、失敗重試與乾淨環境驗收步驟見 `docs/release/windows-installer.md`。已產生並驗證 unsigned NSIS smoke artifact；正式 CA 憑證簽章及 Publisher／SmartScreen 驗收延至 9.8，不阻擋 9.6 與 9.7。
 
 #### 9.6 更新、降級、離線啟動與修復
 

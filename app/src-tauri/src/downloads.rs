@@ -6,12 +6,23 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Once,
     time::Duration,
 };
 use sysinfo::Disks;
 
 const BUFFER_SIZE: usize = 256 * 1024;
 const FREE_SPACE_RESERVE: u64 = 64 * 1024 * 1024;
+
+fn ensure_tls_crypto_provider() {
+    static INITIALIZE: Once = Once::new();
+    INITIALIZE.call_once(|| {
+        // reqwest's rustls-no-provider feature lets Beatforge select Ring and
+        // avoids an unnecessary native AWS-LC build in the Windows installer
+        // toolchain. An already-installed provider is also valid.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,6 +172,7 @@ where
     check_disk_space(destination, artifact.size_bytes.saturating_sub(downloaded))?;
 
     if downloaded < artifact.size_bytes {
+        ensure_tls_crypto_provider();
         let mut client = Client::builder()
             .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(6 * 60 * 60));

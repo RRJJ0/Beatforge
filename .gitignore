@@ -40,5 +40,9 @@ __screenshots__/
 # Release test isolation
 /app/.release-test-runs/
 
+# Locally built release artifacts and transient signing configuration
+/artifacts/
+/app/src-tauri/.release/
+
 # Vite
 *.timestamp-*-*.mjs

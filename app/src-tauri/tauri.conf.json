@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Beatforge",
+  "mainBinaryName": "Beatforge",
   "version": "0.1.0",
   "identifier": "com.beatforge.desktop",
   "build": {
@@ -34,6 +35,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "RRJJ0",
+    "homepage": "https://github.com/RRJJ0/OsuBeatforge",
+    "copyright": "Copyright © 2026 RRJJ0",
+    "license": "MIT",
+    "licenseFile": "../../LICENSE",
+    "category": "Music",
+    "shortDescription": "Local-first AI-assisted osu! beatmap generation",
+    "longDescription": "Beatforge runs Mapperatorinator locally and produces osu! beatmap drafts for further editing in osu! Editor.",
+    "useLocalToolsDir": true,
     "resources": {
       "../../LICENSE": "legal/LICENSE",
       "../../THIRD_PARTY_NOTICES.md": "legal/THIRD_PARTY_NOTICES.md",
