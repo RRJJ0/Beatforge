@@ -6,7 +6,8 @@ param(
     [switch]$TimestampUsesRfc3161,
     [string]$OutputDirectory,
     [string]$CertificateThumbprint = $env:BEATFORGE_WINDOWS_CERTIFICATE_THUMBPRINT,
-    [string]$TimestampUrl = $env:BEATFORGE_WINDOWS_TIMESTAMP_URL
+    [string]$TimestampUrl = $env:BEATFORGE_WINDOWS_TIMESTAMP_URL,
+    [string]$UpdaterPrivateKey = $env:TAURI_SIGNING_PRIVATE_KEY
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,7 @@ $windowsConfigPath = Join-Path $rustRoot 'tauri.windows.conf.json'
 $transientRoot = Join-Path $rustRoot '.release'
 $signingConfigPath = Join-Path $transientRoot "signing-$PID.json"
 $stagingDirectory = $null
+$previousUpdaterPrivateKey = $env:TAURI_SIGNING_PRIVATE_KEY
 
 function Assert-Tool([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -55,6 +57,16 @@ $gitStatus = @(& git.exe -C $repoRoot status --porcelain)
 $sourceDirty = $gitStatus.Count -gt 0
 if ($sourceDirty -and -not $AllowDirty) { throw 'Refusing a release build from a dirty worktree. Commit changes or pass -AllowDirty for a local smoke build.' }
 
+if ([string]::IsNullOrWhiteSpace($UpdaterPrivateKey)) {
+    $localUpdaterKey = Join-Path $transientRoot 'beatforge-updater.key'
+    if (Test-Path -LiteralPath $localUpdaterKey -PathType Leaf) {
+        $UpdaterPrivateKey = $localUpdaterKey
+    }
+}
+if ([string]::IsNullOrWhiteSpace($UpdaterPrivateKey)) {
+    throw 'Updater signing is mandatory. Set TAURI_SIGNING_PRIVATE_KEY or generate the ignored local development key documented for Stage 9.6.'
+}
+
 $signedBuild = -not $AllowUnsigned
 $normalizedThumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
 if ($signedBuild) {
@@ -78,6 +90,7 @@ $stagingDirectory = $finalDirectory + ".staging-$PID"
 if (Test-Path -LiteralPath $stagingDirectory) { throw "Staging directory already exists: $stagingDirectory" }
 
 try {
+    $env:TAURI_SIGNING_PRIVATE_KEY = $UpdaterPrivateKey
     New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
     if ($signedBuild) {
         New-Item -ItemType Directory -Path $transientRoot -Force | Out-Null
@@ -113,13 +126,53 @@ try {
     $installer = Get-ChildItem -LiteralPath $installerDirectory -File -Filter '*-setup.exe' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
     $application = Join-Path $rustRoot 'target\release\Beatforge.exe'
     if ($null -eq $installer) { throw 'Tauri did not produce an NSIS setup executable' }
+    $updaterSignature = Get-Item -LiteralPath ($installer.FullName + '.sig') -ErrorAction SilentlyContinue
+    if ($null -ne $updaterSignature -and $updaterSignature.LastWriteTimeUtc -lt $installer.LastWriteTimeUtc) {
+        Remove-Item -LiteralPath $updaterSignature.FullName -Force
+        $updaterSignature = $null
+    }
+    if ($null -eq $updaterSignature -and -not $signedBuild) {
+        Push-Location $appRoot
+        try {
+            $signArguments = @('tauri', 'signer', 'sign', '--app-version', [string]$baseConfig.version)
+            if (Test-Path -LiteralPath $UpdaterPrivateKey -PathType Leaf) {
+                $env:TAURI_SIGNING_PRIVATE_KEY = $null
+                $signArguments += @('--private-key-path', [System.IO.Path]::GetFullPath($UpdaterPrivateKey))
+            }
+            $signArguments += $installer.FullName
+            Invoke-Checked 'Updater artifact signing' { & pnpm.cmd @signArguments }
+        }
+        finally {
+            $env:TAURI_SIGNING_PRIVATE_KEY = $UpdaterPrivateKey
+            Pop-Location
+        }
+        $updaterSignature = Get-Item -LiteralPath ($installer.FullName + '.sig') -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $updaterSignature) { throw 'Tauri did not produce the mandatory signed updater artifact' }
     if (-not (Test-Path -LiteralPath $application -PathType Leaf)) { throw 'Tauri did not produce Beatforge.exe' }
 
     Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $stagingDirectory $installer.Name)
+    Copy-Item -LiteralPath $updaterSignature.FullName -Destination (Join-Path $stagingDirectory $updaterSignature.Name)
     Copy-Item -LiteralPath $application -Destination (Join-Path $stagingDirectory 'Beatforge.exe')
     Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $stagingDirectory 'LICENSE')
     Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md') -Destination (Join-Path $stagingDirectory 'THIRD_PARTY_NOTICES.md')
     Copy-Item -LiteralPath (Join-Path $repoRoot 'third_party\dependency-inventory.json') -Destination (Join-Path $stagingDirectory 'dependency-inventory.json')
+
+    $signatureText = (Get-Content -LiteralPath $updaterSignature.FullName -Raw).Trim()
+    if ([string]::IsNullOrWhiteSpace($signatureText)) { throw 'Updater signature is empty' }
+    $releaseUrl = "https://github.com/RRJJ0/OsuBeatforge/releases/download/v$($baseConfig.version)/$($installer.Name)"
+    $updateManifest = [ordered]@{
+        version = [string]$baseConfig.version
+        notes = "Beatforge $($baseConfig.version)"
+        pub_date = [DateTimeOffset]::UtcNow.ToString('O')
+        platforms = [ordered]@{
+            'windows-x86_64' = [ordered]@{
+                signature = $signatureText
+                url = $releaseUrl
+            }
+        }
+    }
+    [System.IO.File]::WriteAllText((Join-Path $stagingDirectory 'latest.json'), ($updateManifest | ConvertTo-Json -Depth 6) + "`n", [System.Text.UTF8Encoding]::new($false))
 
     $executableFiles = @(Get-ChildItem -LiteralPath $stagingDirectory -File -Filter '*.exe')
     $signatureRecords = @(
@@ -190,6 +243,7 @@ try {
     Write-Host "`nWindows release artifact ready: $finalDirectory" -ForegroundColor Green
 }
 finally {
+    $env:TAURI_SIGNING_PRIVATE_KEY = $previousUpdaterPrivateKey
     if (Test-Path -LiteralPath $signingConfigPath) { Remove-Item -LiteralPath $signingConfigPath -Force }
     if ((Test-Path -LiteralPath $transientRoot) -and -not (Get-ChildItem -LiteralPath $transientRoot -Force)) { Remove-Item -LiteralPath $transientRoot -Force }
     if ($null -ne $stagingDirectory -and (Test-Path -LiteralPath $stagingDirectory)) { Remove-Item -LiteralPath $stagingDirectory -Recurse -Force }

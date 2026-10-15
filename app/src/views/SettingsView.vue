@@ -29,11 +29,13 @@ import {
 } from '@vicons/ionicons5'
 import {
   isDesktopRuntime,
+  checkForAppUpdate,
   cleanupStorage,
   exportDiagnosticPackage,
   exportDesktopSettings,
   getStorageUsage,
   loadDesktopSettings,
+  installAppUpdate,
   previewDesktopSettingsImport,
   previewDiagnosticExport,
   previewStorageCleanup,
@@ -54,6 +56,7 @@ import {
 import type {
   AppLocale,
   AppSettings,
+  AppUpdateCheck,
   DiagnosticPreview,
   SettingsImportPreview,
   StorageCategory,
@@ -79,6 +82,9 @@ const autoImport = ref(savedSettings.autoImport ?? true)
 const keepIntermediate = ref(savedSettings.keepIntermediate ?? false)
 const repairGeneratedOutput = ref(savedSettings.repairGeneratedOutput ?? true)
 const updates = ref(savedSettings.checkUpdates ?? true)
+const updateCheck = ref<AppUpdateCheck | null>(null)
+const updateLoading = ref(false)
+const updateInstalling = ref(false)
 const desktopNotifications = ref(savedSettings.desktopNotifications ?? true)
 const selectedLocale = ref<AppLocale>(savedSettings.locale === 'zh-TW' ? 'zh-TW' : locale.value)
 const notificationPermission = ref<DesktopNotificationPermission>('unavailable')
@@ -149,9 +155,35 @@ onMounted(async () => {
   } catch (reason) {
     message.error(`Could not load desktop settings: ${String(reason)}`)
   }
+  if (updates.value) await checkUpdates(true)
   await refreshStorage(true)
   notificationPermission.value = await desktopNotificationPermission()
 })
+
+async function checkUpdates(silent = false) {
+  if (!isDesktopRuntime()) return
+  updateLoading.value = true
+  try {
+    updateCheck.value = await checkForAppUpdate()
+    if (!silent && updateCheck.value.status === 'up_to_date') {
+      message.success(t('settings.updateCurrent'))
+    }
+  } catch (reason) {
+    if (!silent) message.error(`${t('settings.updateCheckFailed')}: ${String(reason)}`)
+  } finally {
+    updateLoading.value = false
+  }
+}
+
+async function applyUpdate() {
+  updateInstalling.value = true
+  try {
+    await installAppUpdate()
+  } catch (reason) {
+    message.error(`${t('settings.updateInstallFailed')}: ${String(reason)}`)
+    updateInstalling.value = false
+  }
+}
 
 async function runDiagnostics() {
   checking.value = true
@@ -674,8 +706,37 @@ async function performStorageCleanup() {
           <div>
             <strong>{{ t('settings.updates') }}</strong><small>{{ t('settings.updatesHelp') }}</small>
           </div>
-          <NSwitch v-model:value="updates" :aria-label="t('settings.updates')" />
+          <div class="setting-actions">
+            <NSwitch v-model:value="updates" :aria-label="t('settings.updates')" />
+            <NButton size="small" secondary :loading="updateLoading" @click="checkUpdates(false)">
+              {{ t('settings.checkNow') }}
+            </NButton>
+          </div>
         </div>
+        <NAlert
+          v-if="updateCheck"
+          :type="updateCheck.status === 'available' ? 'info' : updateCheck.status === 'offline' ? 'warning' : 'success'"
+          :show-icon="false"
+        >
+          <div class="update-result">
+            <span v-if="updateCheck.status === 'available'">
+              {{ t('settings.updateAvailable') }} {{ updateCheck.availableVersion }}
+            </span>
+            <span v-else-if="updateCheck.status === 'offline'">
+              {{ updateCheck.message || t('settings.updateOffline') }}
+            </span>
+            <span v-else>{{ t('settings.updateCurrent') }} {{ updateCheck.currentVersion }}</span>
+            <NButton
+              v-if="updateCheck.status === 'available'"
+              size="small"
+              type="primary"
+              :loading="updateInstalling"
+              @click="applyUpdate"
+            >
+              {{ t('settings.installUpdate') }}
+            </NButton>
+          </div>
+        </NAlert>
         <div class="setting-row">
           <div>
             <strong>{{ t('settings.notifications') }}</strong
@@ -923,6 +984,15 @@ async function performStorageCleanup() {
 .setting-row strong,
 .setting-row small {
   display: block;
+}
+.setting-actions,
+.update-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-result {
+  justify-content: space-between;
 }
 .setting-row strong {
   font-size: 12px;

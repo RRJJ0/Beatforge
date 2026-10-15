@@ -4,6 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import type {
   AppPaths,
   AppSettings,
+  AppUpdateCheck,
   BackgroundImageInfo,
   ComputeBackend,
   DiagnosticExportResult,
@@ -105,6 +106,14 @@ export async function loadDesktopSettings() {
 
 export async function saveDesktopSettings(settings: AppSettings) {
   return invoke<void>('save_settings', { settings })
+}
+
+export async function checkForAppUpdate() {
+  return invoke<AppUpdateCheck>('check_for_app_update')
+}
+
+export async function installAppUpdate() {
+  return invoke<void>('install_app_update')
 }
 
 export async function selectSettingsImportFile(): Promise<string | null> {

@@ -856,7 +856,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - [x] 9.3：建立隱私安全的診斷匯出與問題回報流程。
 - [x] 9.4：完成第三方依賴、模型與資料授權盤點。
 - [x] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
-- [ ] 9.6：建立自動更新、降級、離線啟動與環境修復流程。
+- [x] 9.6：建立自動更新、降級、離線啟動與環境修復流程。
 - [ ] 9.7：建立 NVIDIA GPU、顯存與驅動支援矩陣。
 - [ ] 9.8：建立 release pipeline，並完成 release candidate 實機驗收。
 
@@ -926,6 +926,8 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - 無網路時仍可使用已安裝 runtime／model 完成生成；缺少或損壞的元件則提供可重試、可驗證的修復流程。
 
 驗收：正常更新、更新中斷、簽章錯誤、離線啟動、支援範圍內降級與 runtime／model 修復案例通過，使用者資料保持一致。
+
+實作結果：加入 Tauri updater 與 Settings「立即檢查／安裝並重新啟動」介面，固定使用 HTTPS static manifest、內嵌 public key、`requireSignedVersion` 及 strictly-newer SemVer policy；updater minisign 與 Windows Authenticode 分離，因此 unsigned 開發 installer 仍會產生不可竄改且綁定版本的 `.sig` 與 `latest.json`。套用前會在 app-data 以可回復 replace 寫入 `update-state.json`，下次啟動辨識成功版本或保留舊版並提供安全重試。資料庫在任何 migration／manifest sync 前檢查最高 schema，舊版遇到較新資料會在零寫入下停止並顯示復原說明；settings 與 package manifest 也持續拒絕未知新 schema。更新服務離線只回報 `offline`，不阻擋使用已驗證的本機 runtime／model；下載支援 `.part` resume、size／SHA-256 驗證、有效 cache 離線重用，安裝則透過 staging／backup 防止損壞既有環境。`scripts/Test-UpdatePolicy.ps1` 已加入 release gate，並以單元測試覆蓋 downgrade、future-schema 零寫入、更新狀態回復、cache offline reuse、安裝中斷復原、簽章竄改及 signed-version mismatch。流程與開發 key／正式 release key 邊界記錄於 `docs/release/updates-and-recovery.md`；真正由公開 endpoint 進行的雙版本更新及正式 CA 簽章實機紀錄延至 9.8 release candidate。
 
 #### 9.7 GPU 與驅動支援矩陣
 

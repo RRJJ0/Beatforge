@@ -424,6 +424,30 @@ mod tests {
     }
 
     #[test]
+    fn verified_cached_artifact_is_available_without_network() {
+        let data = b"offline cached artifact".to_vec();
+        let directory = temp_directory("offline-cache");
+        fs::write(directory.join("model.bin"), &data).unwrap();
+        let artifact = PackageArtifact {
+            url: "https://offline.invalid/model.bin".into(),
+            size_bytes: data.len() as u64,
+            sha256: hash(&data),
+            file_name: "model.bin".into(),
+        };
+        let mut events = Vec::new();
+        let result = download_artifact("test-model", &artifact, &directory, |event| {
+            events.push(event);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(fs::read(result).unwrap(), data);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].status, PackageStatus::Verifying);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn disk_check_keeps_a_safety_reserve() {
         let one_megabyte = 1024 * 1024;
         let error =

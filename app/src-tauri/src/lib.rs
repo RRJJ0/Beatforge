@@ -10,8 +10,10 @@ use std::{
 use sysinfo::{Disks, System};
 use tauri::{AppHandle, Emitter, Manager};
 
+mod app_updates;
 mod artifact_name;
 mod background;
+mod database_compatibility;
 mod diagnostics;
 mod downloads;
 mod environment;
@@ -593,6 +595,7 @@ pub(crate) fn build_paths(app: &AppHandle) -> Result<AppPaths, String> {
 pub(crate) fn open_database(app: &AppHandle) -> Result<(Connection, AppPaths), String> {
     let paths = build_paths(app)?;
     let connection = Connection::open(&paths.database).map_err(|error| error.to_string())?;
+    database_compatibility::ensure_supported(&connection)?;
     connection.execute_batch(
     "PRAGMA journal_mode = WAL;
      PRAGMA foreign_keys = ON;
@@ -1872,6 +1875,7 @@ pub fn run() {
     let application = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             mapperatorinator_lock::validate_builtin().map_err(std::io::Error::other)?;
             let (connection, paths) = open_database(app.handle()).map_err(std::io::Error::other)?;
@@ -1886,6 +1890,7 @@ pub fn run() {
                 let _ = worker::cleanup_job_artifacts(app.handle(), &id);
             }
             packages::mark_interrupted(&connection).map_err(std::io::Error::other)?;
+            app_updates::reconcile_on_start(app.handle()).map_err(std::io::Error::other)?;
             app.manage(worker::WorkerManager::new(app.handle().clone()));
             app.manage(environment::EnvironmentManager::new());
             if cfg!(debug_assertions) {
@@ -1911,6 +1916,8 @@ pub fn run() {
             get_storage_usage,
             preview_storage_cleanup,
             cleanup_storage,
+            app_updates::check_for_app_update,
+            app_updates::install_app_update,
             create_job,
             list_jobs,
             list_managed_packages,

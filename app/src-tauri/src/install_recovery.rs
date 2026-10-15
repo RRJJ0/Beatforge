@@ -102,4 +102,23 @@ mod tests {
         assert!(target.join("marker").is_file());
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn keeps_active_target_and_clears_only_stale_staging() {
+        let root = temp_directory();
+        let target = root.join("1.0");
+        let staging = root.join(".1.0.staging-fixture");
+        let backup = root.join(".1.0.backup-fixture");
+        fs::create_dir(&target).unwrap();
+        fs::create_dir(&staging).unwrap();
+        fs::create_dir(&backup).unwrap();
+        fs::write(target.join("marker"), b"active").unwrap();
+        fs::write(backup.join("marker"), b"previous").unwrap();
+
+        recover_interrupted_install(&root, &target, "1.0").unwrap();
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"active");
+        assert!(!staging.exists());
+        assert!(backup.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

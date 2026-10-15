@@ -329,6 +329,15 @@ export interface AppSettings {
   locale: AppLocale
 }
 
+export interface AppUpdateCheck {
+  currentVersion: string
+  availableVersion?: string
+  status: 'available' | 'up_to_date' | 'offline'
+  notes?: string
+  publishedAt?: string
+  message?: string
+}
+
 export type AppLocale = 'en' | 'zh-TW'
 
 export interface SettingsImportItem {

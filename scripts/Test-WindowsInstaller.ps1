@@ -23,6 +23,10 @@ Assert-True ($base.mainBinaryName -eq 'Beatforge') 'The installed executable mus
 Assert-True ($base.identifier -eq 'com.beatforge.desktop') 'The stable application identifier changed'
 Assert-True ($base.bundle.license -eq 'MIT') 'Bundle metadata must declare MIT'
 Assert-True ($base.bundle.licenseFile -eq '../../LICENSE') 'Bundle metadata must include the project license'
+Assert-True ($base.bundle.createUpdaterArtifacts -eq $true) 'Signed updater artifacts must be produced'
+Assert-True (-not [string]::IsNullOrWhiteSpace($base.plugins.updater.pubkey)) 'Updater public key is missing'
+Assert-True ($base.plugins.updater.requireSignedVersion -eq $true) 'Updater signatures must be bound to the announced version'
+Assert-True ($base.plugins.updater.endpoints.Count -gt 0) 'Updater endpoint is missing'
 Assert-True ($windows.bundle.targets.Count -eq 1 -and $windows.bundle.targets[0] -eq 'nsis') 'Windows release target must be NSIS only'
 Assert-True ($windows.bundle.windows.nsis.installMode -eq 'currentUser') 'Installer must not require administrator access'
 Assert-True ($windows.bundle.windows.allowDowngrades -eq $false) 'Older installers must not silently downgrade the app'
@@ -42,10 +46,12 @@ Assert-True (Test-Path -LiteralPath $artifactRoot -PathType Container) "Artifact
 
 $installers = @(Get-ChildItem -LiteralPath $artifactRoot -File -Filter '*-setup.exe')
 $applications = @(Get-ChildItem -LiteralPath $artifactRoot -File -Filter 'Beatforge.exe')
+$updaterSignatures = @(Get-ChildItem -LiteralPath $artifactRoot -File -Filter '*-setup.exe.sig')
 Assert-True ($installers.Count -eq 1) 'Expected exactly one NSIS setup executable'
 Assert-True ($applications.Count -eq 1) 'Expected exactly one standalone Beatforge executable'
+Assert-True ($updaterSignatures.Count -eq 1) 'Expected exactly one signed updater artifact'
 
-foreach ($required in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'dependency-inventory.json', 'SHA256SUMS.txt', 'build-provenance.json')) {
+foreach ($required in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'dependency-inventory.json', 'latest.json', 'SHA256SUMS.txt', 'build-provenance.json')) {
     Assert-True (Test-Path -LiteralPath (Join-Path $artifactRoot $required) -PathType Leaf) "Release artifact is missing $required"
 }
 
@@ -66,6 +72,13 @@ Assert-True ($provenance.schemaVersion -eq 1) 'Unsupported build provenance sche
 Assert-True ($provenance.product -eq 'Beatforge') 'Unexpected product in build provenance'
 Assert-True ($provenance.version -eq $base.version) 'Artifact version does not match Tauri configuration'
 Assert-True ($provenance.gitCommit -match '^[0-9a-f]{40}$') 'Build provenance has no full Git commit'
+
+$updateManifest = Get-Content -LiteralPath (Join-Path $artifactRoot 'latest.json') -Raw | ConvertFrom-Json
+$windowsUpdate = $updateManifest.platforms.'windows-x86_64'
+Assert-True ($updateManifest.version -eq $base.version) 'Update manifest version does not match the application'
+Assert-True ($windowsUpdate.url -match '^https://') 'Update artifact URL must use HTTPS'
+Assert-True ($windowsUpdate.url.EndsWith($installers[0].Name)) 'Update manifest URL does not name the generated installer'
+Assert-True ($windowsUpdate.signature -eq (Get-Content -LiteralPath $updaterSignatures[0].FullName -Raw).Trim()) 'Update manifest signature differs from the generated signature'
 
 foreach ($executable in @($installers[0], $applications[0])) {
     $signature = Get-AuthenticodeSignature -LiteralPath $executable.FullName

@@ -91,6 +91,9 @@ try {
     Invoke-ReleaseStep 'Windows installer policy' {
         & (Join-Path $PSScriptRoot 'Test-WindowsInstaller.ps1')
     }
+    Invoke-ReleaseStep 'Update and downgrade policy' {
+        & (Join-Path $PSScriptRoot 'Test-UpdatePolicy.ps1')
+    }
 
     Push-Location $appRoot
     try {
