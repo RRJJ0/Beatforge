@@ -508,10 +508,18 @@ async function createJob() {
                     :step="1"
                 /></NFormItem>
                 <NFormItem :label="t('generate.ar')"
-                  ><NInputNumber v-model:value="selectedDifficulty.approachRate" :min="0" :max="10"
+                  ><NInputNumber
+                    v-model:value="selectedDifficulty.approachRate"
+                    :min="0"
+                    :max="10"
+                    :step="0.1"
                 /></NFormItem>
                 <NFormItem :label="t('generate.cs')"
-                  ><NInputNumber v-model:value="selectedDifficulty.circleSize" :min="0" :max="10"
+                  ><NInputNumber
+                    v-model:value="selectedDifficulty.circleSize"
+                    :min="0"
+                    :max="10"
+                    :step="0.1"
                 /></NFormItem>
                 <div class="switch-row nested">
                   <div>

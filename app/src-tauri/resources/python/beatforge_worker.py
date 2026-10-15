@@ -25,7 +25,8 @@ import zipfile
 
 
 PROTOCOL_VERSION = 1
-WORKER_VERSION = "12"
+WORKER_VERSION = "13"
+PUBLIC_BEATMAP_TAGS = "Beatforge AI mapperatorinator"
 MAX_MESSAGE_BYTES = 64 * 1024
 PROGRESS_WINDOW = (0.0, 100.0)
 MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, Any]] = {}
@@ -475,6 +476,11 @@ def require_descriptors(value: Any, label: str) -> list[str]:
     return normalized
 
 
+def set_public_beatmap_tags(args: Any) -> None:
+    """Keep private generation parameters out of exported beatmap metadata."""
+    args.tags = PUBLIC_BEATMAP_TAGS
+
+
 def install_local_v32_backbone_config(model_path: Path) -> None:
     """Prevent the pinned custom config from resolving Whisper metadata remotely.
 
@@ -819,6 +825,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         if reference_value is not None:
             args.in_context = [inference.ContextType.TIMING]
 
+        set_public_beatmap_tags(args)
         inference.compile_args(args, verbose=True)
         inference.setup_inference_environment(args.seed)
         if args.device == "cuda" and torch.cuda.is_available():

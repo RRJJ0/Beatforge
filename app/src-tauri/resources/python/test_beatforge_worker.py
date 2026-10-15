@@ -1,9 +1,21 @@
 import tempfile
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 import zipfile
 
 import beatforge_worker as worker
+
+
+class BeatmapMetadataTests(unittest.TestCase):
+    def test_public_tags_do_not_expose_private_generation_parameters(self):
+        args = SimpleNamespace(tags=None)
+
+        worker.set_public_beatmap_tags(args)
+
+        self.assertEqual(args.tags, "Beatforge AI mapperatorinator")
+        for private_fragment in ("model=", "seed=", "difficulty=", "\\", ":/"):
+            self.assertNotIn(private_fragment, args.tags)
 
 
 class BackgroundPackagingTests(unittest.TestCase):

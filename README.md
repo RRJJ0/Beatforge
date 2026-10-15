@@ -59,6 +59,33 @@ Vue UI 不直接依賴 Mapperatorinator 的 CLI 格式。桌面核心與 Python 
 8. 查看結果摘要，下載、開啟輸出資料夾或交由 osu! 匯入。
 9. 在 osu! Editor 中繼續人工調整。
 
+## osu! 分享與上傳原則
+
+以下原則最後核對於 2026-10-14；osu! 規則可能更新，實際分享前仍應重新確認 [Beatmap submission](https://osu.ppy.sh/wiki/en/Beatmapping/Beatmap_submission)、[Ranking criteria 的 AI policy](https://osu.ppy.sh/wiki/en/Ranking_criteria#ai-policy)、[Beatmap submission rules](https://osu.ppy.sh/wiki/en/Rules#beatmap-submission-rules) 與 [Beatmapping help](https://osu.ppy.sh/wiki/en/Help_centre/Beatmapping)。
+
+- Beatforge 只負責在本機生成、驗證與交由 osu! 匯入，不會代替使用者將 beatmap 上傳至 osu! 官網。
+- 完整或部分使用 Mapperatorinator 生成的 beatmap，建議以 **Work In Progress（WIP）** 分享並尋求測試／意見，不應以 Pending 表示準備進入排名流程。WIP 是負責任的產品建議，不是 osu! 目前針對所有 AI 譜面的明文強制上傳類別。
+- 現行 Ranking Criteria 要求 hit objects、hitsounds 與 timing 由人類直接建立，不得使用生成式工具；因此 Mapperatorinator 生成的內容不符合 Ranked AI policy。揭露 AI 或事後人工修改，不會自動使原始生成內容取得 Ranked 資格。
+- 必須在 beatmap 網站 description 清楚揭露 Mapperatorinator／AI 實際生成的範圍。`.osu` 的 `Tags` 只用於搜尋，不能取代公開揭露；[Mapperatorinator README](https://github.com/OliBomby/Mapperatorinator#readme) 本身也要求使用者主動揭露 AI 使用情形。
+- osu! 上傳會以每個 difficulty 的 `Creator` 判斷擁有者；上傳前必須確認它與上傳者的 osu! username 完全一致，包含大小寫。目前 Beatforge 仍固定輸出 `Creator: Beatforge AI`，在加入可編輯譜師欄位前，使用者必須於 osu! Editor 手動修正所有 difficulty。
+- WIP 仍必須遵守內容與權利規則。使用者應確認歌曲、背景、影片、hitsound 與其他資源具有可供 osu! 分享的權利，並依規則提供必要來源；Beatforge 的本機生成與 validation 不代表取得內容授權。
+- Beatforge 與 osu! 官方沒有從屬或背書關係；validation 通過只表示輸出符合本專案已實作的結構／安全檢查，不代表 osu! 官方接受、可 Ranked 或內容權利已清除。
+
+建議放在 osu! beatmap description 的英文揭露範本：
+
+```text
+This beatmap was generated using Mapperatorinator through Beatforge.
+
+AI was used to generate the timing, hit objects, and hitsounds.
+Uploaded as Work in Progress for testing and feedback.
+This beatmap is not intended for ranking.
+
+Mapperatorinator:
+https://github.com/OliBomby/Mapperatorinator
+```
+
+若實際只使用部分生成能力，應按真實情況修改第二行，不得把 AI 生成的 timing、hit objects 或 hitsounds 描述為完全人工製作。
+
 ## 主要功能
 
 ### 首次啟動與環境檢查
@@ -820,6 +847,8 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 
 目標：在譜面集與媒體內容的基礎結構穩定後，建立可重現、可更新和可支援的 Windows 發布流程。
 
+Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱私安全的診斷／資料邊界、完整 Git 歷史掃描、Beatforge 專案 LICENSE、第三方 notices，以及 AI 生成與 osu! 上傳限制說明全部通過審查後，才轉為 Public Preview。公開原始碼不代表 installer 已可正式發布；簽章 installer、更新與 release candidate 仍依 9.5–9.8 的驗收進行。`app/package.json` 的 `private: true` 繼續保留，只用來防止前端套件被誤發布至 npm，與 GitHub repository visibility 無關。
+
 規劃子項目：
 
 - [x] 9.1：建立發布層級的自動化測試基線與固定測試資料。
@@ -857,17 +886,20 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - 預設排除歌曲、`.osu`／`.osz` 內容、圖片、影片、完整個人路徑、使用者名稱及其他不必要的個人資訊；路徑與自由文字錯誤內容必須經過 redaction。
 - 診斷匯出只讀取 allowlist 內的資料，使用版本化 manifest，並在建立檔案前顯示內容與隱私提醒。
 - 建立 bug／hardware compatibility issue template，要求提供診斷 ID、重現步驟及預期／實際結果，不要求公開歌曲內容。
+- Public Preview 前掃描目前工作樹與完整 Git 歷史，確認沒有曾提交的 token、credential、歌曲／譜面、真實 job database、個人路徑、使用者名稱或其他無法靠刪除最新檔案移除的敏感內容。
 
 驗收：診斷包足以判斷常見安裝、GPU、worker 與 validation 問題，且自動化測試確認其中不含歌曲檔案、beatmap 內容或未清理的個人路徑。
 
 #### 9.4 授權與第三方 Notices
 
+- 為 Beatforge 選定並加入根目錄 LICENSE，同步 Rust package metadata；未加入 LICENSE 前即使 repository 可見，也不得宣稱為可自由修改與散布的開源專案。
 - 盤點 Rust crates、npm packages、Python packages、FFmpeg／媒體相關能力，以及 installer／updater 使用的第三方元件與版本。
 - 分別確認 Mapperatorinator 程式碼、模型權重、設定檔、可能涉及的訓練資料聲明與重新散布限制；不能隨 installer 發布的內容改用首次啟動下載。
 - 建立可隨版本重現的 dependency inventory、授權文字、copyright notice、source offer／連結與隱私說明。
+- 在公開文件中明確說明 AI／Mapperatorinator 使用揭露、建議僅以 WIP 分享、現行 osu! Ranked AI policy、輸入媒體權利責任，以及 Beatforge 與 osu! 官方沒有從屬或背書關係。
 - 將禁止散布、授權不明或 notice 缺失視為 release blocker，不以自動掃描結果取代人工確認。
 
-驗收：installer 與 release artifact 內附完整 Third-party notices；所有實際散布的二進位、模型與資源都有可追蹤的授權依據。
+驗收：Beatforge 本身的授權與第三方授權邊界清楚；installer 與 release artifact 內附完整 Third-party notices；所有實際散布的二進位、模型與資源都有可追蹤的授權依據。完成 9.3 隱私驗收後，repository 才具備轉為 Public Preview 的條件。
 
 #### 9.5 Windows Installer 與簽章
 
@@ -963,6 +995,7 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - 取消或失敗後，以可追蹤方式清理暫存資料。
 - Telemetry 和 crash report 必須透明且可選擇關閉。
 - 診斷匯出預設排除歌曲、beatmap 內容和個人路徑等敏感資料。
+- 對外的 `.osu` metadata 不得包含模型路徑、使用者名稱或生成參數；可重現資訊只保存在受管理的 provenance。
 
 ## 授權與命名注意事項
 
@@ -979,6 +1012,7 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 - 局部 remap、timing-only、hitsound-only 與 guest difficulty。
 - MaiMod 品質建議。
 - 輕量 beatmap 視覺預覽。
+- 擴充生成頁的譜面設定：每個難度可調 HP、OD、基本滑條速度與滑條點倍率；歌曲層級可編輯譜師、原文標題／歌手、來源與公開標籤，並另行評估堆疊寬容度、倒數、寬螢幕及其他 osu! metadata 選項。
 - LoRA 與自訂 checkpoint 管理。
 - AMD／Linux 支援。
 - 可選的遠端 GPU worker，但仍沿用相同 job protocol。
