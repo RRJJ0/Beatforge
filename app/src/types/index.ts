@@ -347,6 +347,27 @@ export interface SettingsImportPreview {
   resultingSettings: AppSettings
 }
 
+export interface DiagnosticFilePreview {
+  name: string
+  description: string
+  sizeBytes: number
+}
+
+export interface DiagnosticPreview {
+  schemaVersion: number
+  diagnosticId: string
+  files: DiagnosticFilePreview[]
+  excluded: string[]
+  privacyNotice: string
+  totalBytes: number
+}
+
+export interface DiagnosticExportResult {
+  path: string
+  diagnosticId: string
+  files: number
+}
+
 export type StorageCategory =
   'runtime' | 'models' | 'cache' | 'logs' | 'jobsRaw' | 'jobsWorking' | 'jobsValidated'
 

@@ -30,14 +30,17 @@ import {
 import {
   isDesktopRuntime,
   cleanupStorage,
+  exportDiagnosticPackage,
   exportDesktopSettings,
   getStorageUsage,
   loadDesktopSettings,
   previewDesktopSettingsImport,
+  previewDiagnosticExport,
   previewStorageCleanup,
   resetDesktopSettings,
   saveDesktopSettings,
   selectDirectory,
+  selectDiagnosticExportFile,
   selectSettingsExportFile,
   selectSettingsImportFile,
 } from '@/services/desktop'
@@ -51,6 +54,7 @@ import {
 import type {
   AppLocale,
   AppSettings,
+  DiagnosticPreview,
   SettingsImportPreview,
   StorageCategory,
   StorageCleanupPreview,
@@ -90,6 +94,9 @@ const cleanupPlanCategories = ref<StorageCategory[]>([])
 const cleanupPreview = ref<StorageCleanupPreview | null>(null)
 const cleanupResult = ref<StorageCleanupResult | null>(null)
 const allowProtectedCleanup = ref(false)
+const diagnosticPreview = ref<DiagnosticPreview | null>(null)
+const diagnosticLoading = ref(false)
+const diagnosticConsent = ref(false)
 const gpu = computed(() => desktopStore.system?.gpu)
 
 const storageLabels: Record<StorageCategory, string> = {
@@ -228,6 +235,38 @@ async function applySettingsImport() {
     message.error(`Could not apply imported settings: ${String(reason)}`)
   } finally {
     transferring.value = false
+  }
+}
+
+async function reviewDiagnosticExport() {
+  if (!isDesktopRuntime()) {
+    return message.info(t('settings.diagnosticsDesktopOnly'))
+  }
+  diagnosticLoading.value = true
+  try {
+    diagnosticPreview.value = await previewDiagnosticExport()
+    diagnosticConsent.value = false
+  } catch (reason) {
+    message.error(t('settings.diagnosticsPreviewFailed', { error: String(reason) }))
+  } finally {
+    diagnosticLoading.value = false
+  }
+}
+
+async function createDiagnosticExport() {
+  if (!diagnosticPreview.value || !diagnosticConsent.value) return
+  const path = await selectDiagnosticExportFile(diagnosticPreview.value.diagnosticId)
+  if (!path) return
+  diagnosticLoading.value = true
+  try {
+    const result = await exportDiagnosticPackage(path, diagnosticPreview.value.diagnosticId)
+    diagnosticPreview.value = null
+    diagnosticConsent.value = false
+    message.success(t('settings.diagnosticsExported', { id: result.diagnosticId }))
+  } catch (reason) {
+    message.error(t('settings.diagnosticsExportFailed', { error: String(reason) }))
+  } finally {
+    diagnosticLoading.value = false
   }
 }
 
@@ -592,6 +631,26 @@ async function performStorageCleanup() {
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">
           <div>
+            <h2 class="section-title">{{ t('settings.diagnostics') }}</h2>
+            <p class="section-copy">{{ t('settings.diagnosticsHelp') }}</p>
+          </div>
+          <NTag round size="small">Schema v1</NTag>
+        </div>
+        <NAlert type="info" :show-icon="false">
+          {{ t('settings.diagnosticsPrivacy') }}
+        </NAlert>
+        <NButton
+          block
+          secondary
+          :loading="diagnosticLoading"
+          @click="reviewDiagnosticExport"
+        >
+          {{ t('settings.reviewDiagnostics') }}
+        </NButton>
+      </NCard>
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
             <h2 class="section-title">{{ t('settings.application') }}</h2>
             <p class="section-copy">{{ t('settings.applicationHelp') }}</p>
           </div>
@@ -785,6 +844,54 @@ async function performStorageCleanup() {
       </div>
     </NCard>
   </NModal>
+
+  <NModal
+    :show="Boolean(diagnosticPreview)"
+    @update:show="(show) => !show && (diagnosticPreview = null)"
+  >
+    <NCard class="diagnostic-preview" :bordered="false" role="dialog" aria-modal="true">
+      <div class="card-heading">
+        <div>
+          <h2 class="section-title">{{ t('settings.reviewDiagnostics') }}</h2>
+          <p class="section-copy">
+            {{ diagnosticPreview?.diagnosticId }} ·
+            {{ formatBytes(diagnosticPreview?.totalBytes ?? 0) }}
+          </p>
+        </div>
+        <NTag round size="small">Schema v{{ diagnosticPreview?.schemaVersion }}</NTag>
+      </div>
+      <NAlert type="warning" :show-icon="false">
+        {{ diagnosticPreview?.privacyNotice }}
+      </NAlert>
+      <div class="diagnostic-files">
+        <div v-for="file in diagnosticPreview?.files" :key="file.name">
+          <span>
+            <strong class="mono">{{ file.name }}</strong>
+            <small>{{ file.description }}</small>
+          </span>
+          <strong>{{ formatBytes(file.sizeBytes) }}</strong>
+        </div>
+      </div>
+      <h3 class="diagnostic-subtitle">{{ t('settings.diagnosticsExcluded') }}</h3>
+      <ul class="diagnostic-excluded">
+        <li v-for="item in diagnosticPreview?.excluded" :key="item">{{ item }}</li>
+      </ul>
+      <NCheckbox v-model:checked="diagnosticConsent">
+        {{ t('settings.diagnosticsConfirm') }}
+      </NCheckbox>
+      <div class="modal-actions">
+        <NButton @click="diagnosticPreview = null">{{ t('common.cancel') }}</NButton>
+        <NButton
+          type="primary"
+          :loading="diagnosticLoading"
+          :disabled="!diagnosticConsent"
+          @click="createDiagnosticExport"
+        >
+          {{ t('settings.exportDiagnostics') }}
+        </NButton>
+      </div>
+    </NCard>
+  </NModal>
 </template>
 
 <style scoped>
@@ -901,6 +1008,11 @@ async function performStorageCleanup() {
   max-height: calc(100vh - 64px);
   overflow: auto;
 }
+.diagnostic-preview {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
 .storage-list,
 .cleanup-items {
   display: grid;
@@ -941,6 +1053,35 @@ async function performStorageCleanup() {
   gap: 20px;
   padding: 12px 0;
   border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.diagnostic-files {
+  display: grid;
+  margin: 14px 0;
+}
+.diagnostic-files > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.diagnostic-files span strong,
+.diagnostic-files span small {
+  display: block;
+}
+.diagnostic-files span small,
+.diagnostic-excluded {
+  margin-top: 3px;
+  color: #858da0;
+  font-size: 9px;
+}
+.diagnostic-subtitle {
+  margin: 12px 0 6px;
+  font-size: 11px;
+}
+.diagnostic-excluded {
+  margin-bottom: 14px;
+  padding-left: 18px;
 }
 .cleanup-items span strong,
 .cleanup-items span small {

@@ -6,6 +6,8 @@ import type {
   AppSettings,
   BackgroundImageInfo,
   ComputeBackend,
+  DiagnosticExportResult,
+  DiagnosticPreview,
   EnvironmentDiagnostics,
   EnvironmentInstallEvent,
   GenerationJob,
@@ -134,6 +136,23 @@ export async function previewDesktopSettingsImport(path: string) {
 
 export async function resetDesktopSettings(field?: keyof AppSettings) {
   return invoke<AppSettings>('reset_settings', { field: field ?? null })
+}
+
+export async function previewDiagnosticExport() {
+  return invoke<DiagnosticPreview>('preview_diagnostic_export')
+}
+
+export async function selectDiagnosticExportFile(diagnosticId: string): Promise<string | null> {
+  if (!isDesktopRuntime()) return null
+  const selected = await save({
+    defaultPath: `beatforge-${diagnosticId.toLowerCase()}.zip`,
+    filters: [{ name: 'Beatforge diagnostic package', extensions: ['zip'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function exportDiagnosticPackage(path: string, diagnosticId: string) {
+  return invoke<DiagnosticExportResult>('export_diagnostics', { path, diagnosticId })
 }
 
 export async function getStorageUsage() {

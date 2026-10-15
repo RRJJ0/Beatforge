@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security or privacy report
+    url: https://github.com/RRJJ0/OsuBeatforge/security/advisories/new
+    about: Report a credential, privacy, or security issue privately instead of opening a public issue.

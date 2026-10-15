@@ -853,7 +853,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 
 - [x] 9.1：建立發布層級的自動化測試基線與固定測試資料。
 - [x] 9.2：完成端到端流程、異常復原與長時間穩定性測試。
-- [ ] 9.3：建立隱私安全的診斷匯出與問題回報流程。
+- [x] 9.3：建立隱私安全的診斷匯出與問題回報流程。
 - [ ] 9.4：完成第三方依賴、模型與資料授權盤點。
 - [ ] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
 - [ ] 9.6：建立自動更新、降級、離線啟動與環境修復流程。
@@ -891,6 +891,8 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - Public Preview 前掃描目前工作樹與完整 Git 歷史，確認沒有曾提交的 token、credential、歌曲／譜面、真實 job database、個人路徑、使用者名稱或其他無法靠刪除最新檔案移除的敏感內容。
 
 驗收：診斷包足以判斷常見安裝、GPU、worker 與 validation 問題，且自動化測試確認其中不含歌曲檔案、beatmap 內容或未清理的個人路徑。
+
+實作結果：Settings 新增診斷匯出卡片與兩階段確認流程；後端以 deny-by-default allowlist 建立 schema v1 ZIP，使用者必須先檢查檔案、大小、排除項目與隱私提醒，勾選確認後才能選擇儲存位置。診斷內容包含 app／OS／CPU／GPU／VRAM／driver、固定 Mapperatorinator commit、runtime／model package 狀態、非路徑設定、匿名 job stage 與 validation code/count，以及近期 log 的大小／行數／invalid UTF-8／已知 stable error code 計數；不包含 raw log 文字、traceback、SQLite、歌曲、`.osu`／`.osz`、圖片、影片、生成成果、完整路徑、username、title、artist、descriptor、seed 或自由文字錯誤。ZIP 內 `manifest.json` 記錄 diagnostic ID、schema、UTC、檔案大小與 SHA-256，輸出拒絕覆寫且失敗會移除 partial。GitHub bug／hardware issue templates 只要求 diagnostic ID、重現步驟與必要硬體資料，並強制確認未附加私人內容。資料邊界與測試策略見 `docs/architecture/diagnostic-export.md`。`scripts/Test-RepositoryPrivacy.ps1` 會掃描所有 reachable Git revisions 的 credential／個人路徑 pattern 與禁止的 media、database、model artifact，並已納入 release gate；2026-10-15 的 44-revision baseline 無敏感內容，僅有 allowlisted app icons、synthetic validation fixtures 與 `C:\Users\You` 泛用 UI placeholder，詳見 `docs/testing/stage-9-privacy-scan.md`。
 
 #### 9.4 授權與第三方 Notices
 

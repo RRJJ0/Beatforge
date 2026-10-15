@@ -1,0 +1,60 @@
+name: Hardware compatibility report
+description: Report Mapperatorinator, NVIDIA GPU, driver, CUDA, VRAM, or performance compatibility.
+title: "[Hardware]: "
+labels: [hardware]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use Settings → Diagnostics export for system and package metadata. Never upload source songs, generated beatmaps, media, databases, or raw logs.
+  - type: input
+    id: version
+    attributes:
+      label: Beatforge version or commit
+    validations:
+      required: true
+  - type: input
+    id: diagnostic
+    attributes:
+      label: Diagnostic ID
+      description: Optional BF-DIAG identifier from the reviewed diagnostic package.
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and VRAM
+      placeholder: NVIDIA GeForce RTX 4070, 12 GB
+    validations:
+      required: true
+  - type: input
+    id: driver
+    attributes:
+      label: NVIDIA driver version
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options:
+        - Generation completed
+        - CUDA out of memory
+        - Model failed to load
+        - Worker crashed or timed out
+        - Performance or stability problem
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Reproduction and measurements
+      description: Include difficulty count, elapsed time, peak VRAM, stable error code, and recovery result without song identity or local paths.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I did not attach songs, beatmaps, media, databases, raw logs, credentials, or personal paths.
+          required: true

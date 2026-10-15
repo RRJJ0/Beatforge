@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 mod artifact_name;
 mod background;
+mod diagnostics;
 mod downloads;
 mod environment;
 mod formal_worker;
@@ -970,6 +971,31 @@ fn reset_settings(app: AppHandle, field: Option<String>) -> Result<AppSettings, 
 }
 
 #[tauri::command]
+fn preview_diagnostic_export(app: AppHandle) -> Result<diagnostics::DiagnosticPreview, String> {
+    let (connection, paths) = open_database(&app)?;
+    let settings = load_settings_value(&app)?;
+    diagnostics::preview(&connection, &paths, &get_system_info(), &settings)
+}
+
+#[tauri::command]
+fn export_diagnostics(
+    app: AppHandle,
+    path: String,
+    diagnostic_id: String,
+) -> Result<diagnostics::DiagnosticExportResult, String> {
+    let (connection, paths) = open_database(&app)?;
+    let settings = load_settings_value(&app)?;
+    diagnostics::export(
+        &connection,
+        &paths,
+        &get_system_info(),
+        &settings,
+        Path::new(&path),
+        &diagnostic_id,
+    )
+}
+
+#[tauri::command]
 async fn get_storage_usage(app: AppHandle) -> Result<storage::StorageUsageReport, String> {
     let (connection, paths) = open_database(&app)?;
     let active_jobs = jobs::active_ids(&connection)?;
@@ -1880,6 +1906,8 @@ pub fn run() {
             export_settings,
             preview_settings_import,
             reset_settings,
+            preview_diagnostic_export,
+            export_diagnostics,
             get_storage_usage,
             preview_storage_cleanup,
             cleanup_storage,

@@ -82,6 +82,9 @@ try {
     Invoke-ReleaseStep 'Release fixture policy' {
         & (Join-Path $PSScriptRoot 'Test-ReleaseFixtures.ps1')
     }
+    Invoke-ReleaseStep 'Repository privacy policy' {
+        & (Join-Path $PSScriptRoot 'Test-RepositoryPrivacy.ps1')
+    }
 
     Push-Location $appRoot
     try {
