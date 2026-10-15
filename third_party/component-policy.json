@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "name": "CPython standalone runtime",
+      "version": "3.10.21+20260929",
+      "license": "PSF-2.0 and bundled component licenses",
+      "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20260929",
+      "distribution": "download_only"
+    },
+    {
+      "name": "Mapperatorinator",
+      "version": "0e2b0e387aab4b35c64b0b11b12d47578dea7587",
+      "license": "MIT",
+      "source": "https://github.com/OliBomby/Mapperatorinator/tree/0e2b0e387aab4b35c64b0b11b12d47578dea7587",
+      "distribution": "download_only"
+    },
+    {
+      "name": "slider",
+      "version": "ea28c484a0a542d6e094e25aa02e1529ff2c8313",
+      "license": "LGPL-3.0-or-later",
+      "source": "https://github.com/OliBomby/slider/tree/ea28c484a0a542d6e094e25aa02e1529ff2c8313",
+      "distribution": "download_only"
+    },
+    {
+      "name": "Mapperatorinator-v32 model",
+      "version": "74f22583400d259bf424819e11027c17933efe54",
+      "license": "MIT (repository metadata; training-data provenance requires separate review)",
+      "source": "https://huggingface.co/OliBomby/Mapperatorinator-v32/tree/74f22583400d259bf424819e11027c17933efe54",
+      "distribution": "download_only"
+    },
+    {
+      "name": "PyTorch",
+      "version": "2.10.0",
+      "license": "BSD-3-Clause",
+      "source": "https://github.com/pytorch/pytorch/tree/v2.10.0",
+      "distribution": "download_only"
+    },
+    {
+      "name": "torchaudio",
+      "version": "2.10.0",
+      "license": "BSD-2-Clause",
+      "source": "https://github.com/pytorch/audio/tree/v2.10.0",
+      "distribution": "download_only"
+    },
+    {
+      "name": "imageio-ffmpeg",
+      "version": "0.6.0",
+      "license": "BSD-2-Clause; bundled FFmpeg effective license depends on build configuration",
+      "source": "https://github.com/imageio/imageio-ffmpeg/tree/v0.6.0",
+      "distribution": "download_only_manual_ffmpeg_review"
+    }
+  ]
+}

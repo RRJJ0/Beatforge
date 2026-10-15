@@ -854,7 +854,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - [x] 9.1：建立發布層級的自動化測試基線與固定測試資料。
 - [x] 9.2：完成端到端流程、異常復原與長時間穩定性測試。
 - [x] 9.3：建立隱私安全的診斷匯出與問題回報流程。
-- [ ] 9.4：完成第三方依賴、模型與資料授權盤點。
+- [x] 9.4：完成第三方依賴、模型與資料授權盤點。
 - [ ] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
 - [ ] 9.6：建立自動更新、降級、離線啟動與環境修復流程。
 - [ ] 9.7：建立 NVIDIA GPU、顯存與驅動支援矩陣。
@@ -904,6 +904,8 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - 將禁止散布、授權不明或 notice 缺失視為 release blocker，不以自動掃描結果取代人工確認。
 
 驗收：Beatforge 本身的授權與第三方授權邊界清楚；installer 與 release artifact 內附完整 Third-party notices；所有實際散布的二進位、模型與資源都有可追蹤的授權依據。完成 9.3 隱私驗收後，repository 才具備轉為 Public Preview 的條件。
+
+實作結果：Beatforge 根目錄新增 MIT `LICENSE`，Rust package metadata 同步作者、授權與 repository；Tauri bundle 會把 `LICENSE`、`THIRD_PARTY_NOTICES.md` 與固定版本的 `dependency-inventory.json` 放入 `legal/`。`scripts/Update-ThirdPartyInventory.ps1` 以 Cargo metadata、pnpm production license report、hash-pinned Python requirements 與人工複核 mapping 產生無時間戳及本機路徑的 deterministic inventory，目前覆蓋 Rust、npm、Python 及七個 managed components。Mapperatorinator、slider、模型、CPython、PyTorch／torchaudio 與 imageio-ffmpeg／FFmpeg 明確列為首次設定下載，禁止混入 installer；模型因 training-data provenance 說明不足不由 Beatforge mirror，FFmpeg 則必須在每個 release candidate 依實際 build configuration 人工確認 LGPL／GPL 義務。`scripts/Test-ThirdPartyLicenses.ps1` 會阻擋 lockfile 漂移、unknown license、pin 不一致、notice 缺失及 download-only 元件誤入 bundle，並已納入 release gate；公開揭露、WIP 建議、osu! Ranked AI policy、輸入媒體權利與非官方關係記錄於 `docs/legal/licensing-and-distribution.md`。自動掃描不取代發布前人工審查。
 
 #### 9.5 Windows Installer 與簽章
 
@@ -1003,7 +1005,9 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 
 ## 授權與命名注意事項
 
-- Mapperatorinator 程式碼、模型權重、訓練資料與第三方依賴需分別確認授權。
+- Beatforge 原始碼採用 [MIT License](LICENSE)；此授權不涵蓋第三方程式、模型、媒體或使用者內容。
+- 完整套件清單、下載／散布邊界與 attribution 見 [Third-party notices](THIRD_PARTY_NOTICES.md) 及 [授權與散布政策](docs/legal/licensing-and-distribution.md)。
+- Mapperatorinator、模型、Python runtime 與 FFmpeg 等 AI 環境元件由首次設定下載，不包含在 Beatforge installer；模型 training-data provenance 與每個 FFmpeg build 仍須在正式 release 前人工複核。
 - 本專案與 osu! 官方沒有從屬或背書關係。
 - 正式發布前需確認專案名稱、圖示和視覺資產不會造成官方產品混淆。
 - 使用者應對輸入音訊與輸出內容的使用權負責。

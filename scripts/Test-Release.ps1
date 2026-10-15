@@ -85,6 +85,9 @@ try {
     Invoke-ReleaseStep 'Repository privacy policy' {
         & (Join-Path $PSScriptRoot 'Test-RepositoryPrivacy.ps1')
     }
+    Invoke-ReleaseStep 'Third-party license policy' {
+        & (Join-Path $PSScriptRoot 'Test-ThirdPartyLicenses.ps1')
+    }
 
     Push-Location $appRoot
     try {
