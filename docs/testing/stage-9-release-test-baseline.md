@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Stage 9.1 turns the existing frontend, Rust, validation, lifecycle, and Python worker tests into one repeatable GPU-free release gate. It does not claim to validate the Windows installer, updater, NVIDIA hardware, osu! GUI behavior, or long-running generation. Those remain explicit manual or hardware gates in stages 9.2 and 9.5–9.8.
+Stage 9.1 turns the existing frontend, Rust, validation, lifecycle, and Python worker tests into one repeatable GPU-free release gate. Stage 9.2 extends that Rust suite with bounded end-to-end, fault-recovery, and mock-worker soak coverage. It does not claim to validate the Windows installer, updater, NVIDIA hardware, osu! GUI behavior, or long-running production generation. Those remain explicit manual or hardware gates in stages 9.2 and 9.5–9.8.
 
 ## Run the baseline
 
@@ -42,8 +42,8 @@ Binary-like audio, image, video, archive, model, and SQLite inputs are generated
 
 | Gate | Stage | Reason |
 | --- | --- | --- |
-| Full generation with Mapperatorinator weights | 9.2 / 9.7 | Requires a supported NVIDIA GPU and large managed assets |
-| Soak, cancellation, crash, OOM, and restart matrix | 9.2 | Long-running system behavior |
+| Full generation with Mapperatorinator weights | 9.2 / 9.7 | Automated flow uses the mock worker; production soak requires a supported NVIDIA GPU and large managed assets |
+| Production-worker soak and resource baseline | 9.2 / 9.7 | Automated tests cover bounded process isolation and recovery; real CUDA/system resource behavior requires hardware |
 | Privacy-reviewed diagnostic ZIP | 9.3 | Product feature not implemented yet |
 | License and redistribution approval | 9.4 | Requires legal/manual review |
 | Installer and code-signing verification | 9.5 | Requires release certificate and clean Windows environment |

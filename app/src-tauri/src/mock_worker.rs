@@ -69,6 +69,11 @@ pub fn run() -> i32 {
         ("post_processing", 84, "Post-processing patterns"),
         ("packaging", 96, "Validating and packaging result"),
     ];
+    let stage_delay = std::env::var("BEATFORGE_MOCK_STAGE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|value| value.clamp(1, 5_000))
+        .unwrap_or(450);
     for (index, (stage, percent, message)) in stages.iter().enumerate() {
         if let Err(error) = progress(&command, stage, *percent, message) {
             eprintln!("Failed to emit progress: {error}");
@@ -79,7 +84,7 @@ pub fn run() -> i32 {
             thread::sleep(Duration::from_secs(30));
             return 0;
         }
-        thread::sleep(Duration::from_millis(450));
+        thread::sleep(Duration::from_millis(stage_delay));
     }
 
     if matches!(command.scenario.as_str(), "failure" | "oom") {

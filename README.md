@@ -852,7 +852,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 規劃子項目：
 
 - [x] 9.1：建立發布層級的自動化測試基線與固定測試資料。
-- [ ] 9.2：完成端到端流程、異常復原與長時間穩定性測試。
+- [x] 9.2：完成端到端流程、異常復原與長時間穩定性測試。
 - [ ] 9.3：建立隱私安全的診斷匯出與問題回報流程。
 - [ ] 9.4：完成第三方依賴、模型與資料授權盤點。
 - [ ] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
@@ -879,6 +879,8 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - 確認重試或重新啟動不會重複匯入、覆寫成果、污染其他 job，或讓 queue 與 SQLite 狀態分歧。
 
 驗收：主要 E2E 流程可重複通過；長時間測試沒有持續性記憶體／磁碟成長，所有故障都有可理解且可復原的終止狀態。
+
+實作結果：新增 crate 內的 Stage 9 acceptance test，使用隔離的 synthetic audio／`.osz` 與 in-memory SQLite，實際串起多難度 request、job state、validation、statistics、preview、validated artifact identity 及不覆寫的 osu! handoff；重啟測試會將 queued／running／validating 狀態一致轉為 interrupted，retry 後清除舊 output、report 與 provenance。mock worker process integration test 現在涵蓋成功、可恢復 failure、CUDA OOM、crash、malformed JSONL、hang 終止與連續 job 隔離；`scripts/Test-Stage9Stability.ps1` 可用 1–1000 次迭代執行 bounded soak，並確認測試輸出回收及沒有殘留 worker process。完整自動化矩陣、執行方式、production worker／GPU 長跑步驟與 release blocker 定義見 `docs/testing/stage-9-e2e-stability.md`；GPU 型號與驅動相容性仍由 9.7 實機驗收，不以 mock 測試代替。
 
 #### 9.3 診斷匯出與問題回報
 

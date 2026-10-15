@@ -29,6 +29,8 @@ mod request_adapter;
 mod runtime;
 #[cfg(test)]
 mod stage4_acceptance;
+#[cfg(test)]
+mod stage9_acceptance;
 mod storage;
 pub mod validation;
 mod video;

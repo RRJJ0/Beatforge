@@ -51,7 +51,7 @@ fn import_handoff_root(cache_root: &Path) -> Result<PathBuf, String> {
     Ok(handoff_root)
 }
 
-fn create_import_handoff(
+pub(crate) fn create_import_handoff(
     cache_root: &Path,
     job_id: &str,
     artifact: &Path,
