@@ -24,6 +24,7 @@ try {
             AllowedPaths = @(
                 $policyPath,
                 'README.md',
+                'docs/development/roadmap.zh-TW.md',
                 'app/src/views/ModelsView.vue',
                 'app/src-tauri/src/diagnostics.rs',
                 'docs/testing/stage-9-privacy-scan.md'

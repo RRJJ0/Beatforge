@@ -6,10 +6,11 @@ Set-StrictMode -Version Latest
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $matrixPath = Join-Path $repoRoot 'docs\testing\gpu-support-matrix.json'
+$translatedMatrixPath = Join-Path $repoRoot 'docs\testing\stage-9-gpu-support-matrix.zh-TW.md'
 $policyPath = Join-Path $repoRoot 'app\src-tauri\src\gpu_compatibility.rs'
-$readmePath = Join-Path $repoRoot 'README.md'
+$roadmapPath = Join-Path $repoRoot 'docs\development\roadmap.zh-TW.md'
 
-foreach ($path in @($matrixPath, $policyPath, $readmePath)) {
+foreach ($path in @($matrixPath, $translatedMatrixPath, $policyPath, $roadmapPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required GPU compatibility file is missing: $path"
     }
@@ -53,9 +54,9 @@ foreach ($constant in $requiredConstants) {
     }
 }
 
-$readme = Get-Content -LiteralPath $readmePath -Raw
-if ($readme -notmatch '(?m)^- \[x\] 9\.7') {
-    throw 'README must mark Stage 9.7 complete only when this policy gate is present.'
+$roadmap = Get-Content -LiteralPath $roadmapPath -Raw
+if ($roadmap -notmatch '(?m)^- \[x\] 9\.7') {
+    throw 'The historical roadmap must mark Stage 9.7 complete only when this policy gate is present.'
 }
 
 Write-Host 'GPU compatibility policy and physical evidence matrix passed.' -ForegroundColor Green

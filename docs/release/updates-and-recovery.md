@@ -1,5 +1,7 @@
 # Updates, downgrade protection and offline recovery
 
+[繁體中文](updates-and-recovery.zh-TW.md) · [Developer index](../development/README.md)
+
 ## Trust boundary
 
 Beatforge uses Tauri's updater with signed-version enforcement. Every Windows
@@ -81,8 +83,10 @@ Run the GPU-free gate and build an updater-signed unsigned Windows artifact:
 ./scripts/Build-WindowsInstaller.ps1 -AllowUnsigned
 ```
 
-For lifecycle testing, publish two non-public test versions to an isolated HTTPS
-endpoint or draft GitHub release. Verify normal update, an interrupted download,
+For lifecycle testing, provide two versions through an isolated HTTPS test
+endpoint that the test build is configured to read. The production
+`/releases/latest/` endpoint will not select GitHub drafts or prereleases.
+Verify normal update, an interrupted download,
 a modified installer/signature rejection, offline startup, future-schema
 rejection without writes, and repair of a damaged runtime/model. Repeat the
 public release path during Stage 9.8, recording whether Windows Authenticode

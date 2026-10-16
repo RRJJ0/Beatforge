@@ -21,7 +21,7 @@ $windows = Get-Content -LiteralPath $windowsConfigPath -Raw | ConvertFrom-Json
 $releaseNotesPath = Join-Path $repoRoot 'docs\release\release-notes.md'
 $releaseNotes = Get-Content -LiteralPath $releaseNotesPath -Raw
 Assert-True ($releaseNotes -match ('(?m)^# Beatforge ' + [regex]::Escape([string]$base.version) + ' release candidate notes$')) 'Release notes version must match the application version'
-foreach ($document in @('docs\release\known-issues.md', 'docs\release\release-candidate-runbook.md', 'docs\testing\stage-9-gpu-support-matrix.md')) {
+foreach ($document in @('docs\release\release-notes.zh-TW.md', 'docs\release\known-issues.md', 'docs\release\known-issues.zh-TW.md', 'docs\release\release-candidate-runbook.md', 'docs\testing\stage-9-gpu-support-matrix.md', 'docs\testing\stage-9-gpu-support-matrix.zh-TW.md')) {
     Assert-True (Test-Path -LiteralPath (Join-Path $repoRoot $document) -PathType Leaf) "Release document is missing: $document"
 }
 
@@ -60,6 +60,11 @@ Assert-True ($updaterSignatures.Count -eq 1) 'Expected exactly one signed update
 
 foreach ($required in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'dependency-inventory.json', 'RELEASE_NOTES.md', 'KNOWN_ISSUES.md', 'GPU_SUPPORT_MATRIX.md', 'RELEASE_CANDIDATE_RUNBOOK.md', 'latest.json', 'SHA256SUMS.txt', 'build-provenance.json')) {
     Assert-True (Test-Path -LiteralPath (Join-Path $artifactRoot $required) -PathType Leaf) "Release artifact is missing $required"
+}
+if ($RequirePublicRelease) {
+    foreach ($required in @('RELEASE_NOTES.zh-TW.md', 'KNOWN_ISSUES.zh-TW.md', 'GPU_SUPPORT_MATRIX.zh-TW.md')) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $artifactRoot $required) -PathType Leaf) "Public release artifact is missing $required"
+    }
 }
 
 $checksumLines = Get-Content -LiteralPath (Join-Path $artifactRoot 'SHA256SUMS.txt')

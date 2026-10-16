@@ -48,6 +48,7 @@
     "resources": {
       "../../LICENSE": "legal/LICENSE",
       "../../THIRD_PARTY_NOTICES.md": "legal/THIRD_PARTY_NOTICES.md",
+        "../../THIRD_PARTY_NOTICES.zh-TW.md": "legal/THIRD_PARTY_NOTICES.zh-TW.md",
       "../../third_party/dependency-inventory.json": "legal/dependency-inventory.json"
     },
     "icon": [

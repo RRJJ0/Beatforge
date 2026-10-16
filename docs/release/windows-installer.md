@@ -1,5 +1,7 @@
 # Windows installer and signing
 
+[繁體中文](windows-installer.zh-TW.md) · [Developer index](../development/README.md)
+
 ## Supported release shape
 
 Beatforge currently targets 64-bit Windows 10 and Windows 11. The release is a

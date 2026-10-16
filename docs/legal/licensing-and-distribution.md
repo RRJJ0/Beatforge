@@ -1,5 +1,7 @@
 # Licensing and distribution policy
 
+[繁體中文](licensing-and-distribution.zh-TW.md) · [Home](../../README.md)
+
 ## Release boundary
 
 Beatforge is licensed under MIT. Third-party components retain their own

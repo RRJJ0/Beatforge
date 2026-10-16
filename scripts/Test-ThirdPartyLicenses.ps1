@@ -16,6 +16,7 @@ function Assert-True([bool]$Condition, [string]$Message) {
 foreach ($required in @(
     'LICENSE',
     'THIRD_PARTY_NOTICES.md',
+    'THIRD_PARTY_NOTICES.zh-TW.md',
     'docs\legal\licensing-and-distribution.md',
     'third_party\component-policy.json',
     'third_party\python-licenses.json',
@@ -32,6 +33,7 @@ $bundle = Get-Content -LiteralPath (Join-Path $repoRoot 'app\src-tauri\tauri.con
 $resources = $bundle.bundle.resources
 Assert-True ($resources.'../../LICENSE' -eq 'legal/LICENSE') 'Installer does not include Beatforge LICENSE'
 Assert-True ($resources.'../../THIRD_PARTY_NOTICES.md' -eq 'legal/THIRD_PARTY_NOTICES.md') 'Installer does not include third-party notices'
+Assert-True ($resources.'../../THIRD_PARTY_NOTICES.zh-TW.md' -eq 'legal/THIRD_PARTY_NOTICES.zh-TW.md') 'Installer does not include Traditional Chinese third-party notices'
 Assert-True ($resources.'../../third_party/dependency-inventory.json' -eq 'legal/dependency-inventory.json') 'Installer does not include dependency inventory'
 
 $resourceSources = @($resources.PSObject.Properties.Name)

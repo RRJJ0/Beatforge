@@ -1,5 +1,7 @@
 # Windows release-candidate runbook
 
+[繁體中文](release-candidate-runbook.zh-TW.md) · [Developer index](../development/README.md)
+
 Do not publish, tag a final version or upload `latest.json` until every
 required check below has a recorded pass. A local unsigned/dirty smoke artifact
 is never a publishable candidate.

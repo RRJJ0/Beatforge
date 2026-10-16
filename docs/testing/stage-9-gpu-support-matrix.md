@@ -1,5 +1,7 @@
 # Stage 9 GPU and driver support matrix
 
+[繁體中文](stage-9-gpu-support-matrix.zh-TW.md) · [User requirements](../user/requirements.md)
+
 This document is the release-facing source of truth for Beatforge 0.1 GPU support. The machine-readable companion is `gpu-support-matrix.json`. A deterministic policy test keeps its thresholds aligned with the Rust preflight implementation.
 
 ## Support policy

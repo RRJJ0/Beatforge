@@ -1,5 +1,7 @@
 # Beatforge 0.1.0 release candidate notes
 
+[繁體中文](release-notes.zh-TW.md) · [Home](../../README.md)
+
 Status: release candidate. Publication requires release-gate, updater-signature
 and clean-machine acceptance. The publisher must identify which Windows
 signing mode was used for the downloadable artifact.
@@ -29,7 +31,7 @@ CUDA compatibility and actual tested hardware are described in
 
 Generated beatmaps require human review. Do not assume that validation or
 successful import makes a beatmap ready for ranked submission. Follow the
-project README's AI disclosure and osu! upload guidance.
+[AI disclosure and osu! upload guidance](../user/sharing.md).
 
 See `KNOWN_ISSUES.md` and `RELEASE_CANDIDATE_RUNBOOK.md` before testing. The
 exact source revision, tool versions and hashes are in `build-provenance.json`.

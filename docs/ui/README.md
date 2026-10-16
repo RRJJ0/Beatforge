@@ -1,5 +1,7 @@
 # UI design workspace
 
+[繁體中文](README.zh-TW.md) · [Developer index](../development/README.md)
+
 The source of truth for the first desktop wireframe is:
 
 - `osu-ai-desktop-wireframes.drawio`
