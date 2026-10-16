@@ -30,14 +30,14 @@ foreach ($pair in $pairs) {
         -not (Test-Path -LiteralPath $chinesePath -PathType Leaf)) {
         throw "Documentation translation pair is missing: $($pair -join ', ')"
     }
-    $english = Get-Content -LiteralPath $englishPath -Raw
-    $chinese = Get-Content -LiteralPath $chinesePath -Raw
+    $english = Get-Content -LiteralPath $englishPath -Raw -Encoding UTF8
+    $chinese = Get-Content -LiteralPath $chinesePath -Raw -Encoding UTF8
     if (-not $english.Contains((Split-Path -Leaf $chinesePath)) -or
         -not $chinese.Contains((Split-Path -Leaf $englishPath))) {
         throw "Documentation language switch is missing: $($pair -join ', ')"
     }
     foreach ($path in @($englishPath, $chinesePath)) {
-        $source = Get-Content -LiteralPath $path -Raw
+        $source = Get-Content -LiteralPath $path -Raw -Encoding UTF8
         foreach ($match in [regex]::Matches($source, '!?\[[^\]]+\]\(([^)]+)\)')) {
             $target = $match.Groups[1].Value.Split('#')[0]
             if ([string]::IsNullOrWhiteSpace($target) -or $target -match '^[a-z][a-z0-9+.-]*://' -or $target.StartsWith('mailto:')) {
@@ -51,8 +51,8 @@ foreach ($pair in $pairs) {
     }
 }
 
-$readme = Get-Content -LiteralPath (Join-Path $repoRoot 'README.md') -Raw
-if ($readme.Contains('## 開發步驟') -or $readme.Contains('## 系統架構')) {
+$readme = Get-Content -LiteralPath (Join-Path $repoRoot 'README.md') -Raw -Encoding UTF8
+if ($readme -match '(?m)^##\s*(?:\u958B\u767C\u6B65\u9A5F|\u7CFB\u7D71\u67B6\u69CB)\s*$') {
     throw 'The root README must remain user-facing; move developer plans to docs/development.'
 }
 

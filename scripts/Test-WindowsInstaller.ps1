@@ -20,7 +20,7 @@ $base = Get-Content -LiteralPath $baseConfigPath -Raw | ConvertFrom-Json
 $windows = Get-Content -LiteralPath $windowsConfigPath -Raw | ConvertFrom-Json
 $releaseNotesPath = Join-Path $repoRoot 'docs\release\release-notes.md'
 $releaseNotes = Get-Content -LiteralPath $releaseNotesPath -Raw
-Assert-True ($releaseNotes -match ('(?m)^# Beatforge ' + [regex]::Escape([string]$base.version) + ' release candidate notes$')) 'Release notes version must match the application version'
+Assert-True ($releaseNotes -match ('(?m)^# Beatforge ' + [regex]::Escape([string]$base.version) + ' release candidate notes\r?$')) 'Release notes version must match the application version'
 foreach ($document in @('docs\release\release-notes.zh-TW.md', 'docs\release\known-issues.md', 'docs\release\known-issues.zh-TW.md', 'docs\release\release-candidate-runbook.md', 'docs\testing\stage-9-gpu-support-matrix.md', 'docs\testing\stage-9-gpu-support-matrix.zh-TW.md')) {
     Assert-True (Test-Path -LiteralPath (Join-Path $repoRoot $document) -PathType Leaf) "Release document is missing: $document"
 }

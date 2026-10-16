@@ -55,9 +55,10 @@ New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 try {
     & (Join-Path $PSScriptRoot 'Update-ThirdPartyInventory.ps1') -OutputPath $candidatePath
     if ($LASTEXITCODE -ne 0) { throw 'Third-party inventory regeneration failed' }
-    $committedHash = (Get-FileHash -LiteralPath $inventoryPath -Algorithm SHA256).Hash
-    $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash
-    Assert-True ($committedHash -eq $candidateHash) 'Dependency inventory is stale. Run scripts/Update-ThirdPartyInventory.ps1 and review the result.'
+    # PowerShell 5.1 and 7 differ in JSON formatting and culture-aware sort
+    # order. Compare the same package records independent of those details.
+    & node.exe (Join-Path $PSScriptRoot 'Compare-DependencyInventory.js') $inventoryPath $candidatePath
+    Assert-True ($LASTEXITCODE -eq 0) 'Dependency inventory is stale. Run scripts/Update-ThirdPartyInventory.ps1 and review the result.'
 }
 finally {
     $resolvedParent = [System.IO.Path]::GetFullPath($testRoot).TrimEnd('\') + '\'

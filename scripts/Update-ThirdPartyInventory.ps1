@@ -18,14 +18,24 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 
-foreach ($tool in @('cargo.exe', 'pnpm.cmd')) {
+foreach ($tool in @('cargo.exe', 'node.exe', 'pnpm.cmd')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
         throw "Required inventory tool is unavailable: $tool"
     }
 }
 
 function Get-FileSha256([string]$Path) {
-    (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    # Git may check text files out with CRLF on Windows. Inventory hashes are
+    # based on the repository's LF-normalized content, not checkout settings.
+    $content = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8).Replace("`r`n", "`n")
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($content)
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        ([System.BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $hasher.Dispose()
+    }
 }
 
 function Assert-License([string]$Name, [string]$License) {
@@ -34,20 +44,23 @@ function Assert-License([string]$Name, [string]$License) {
     }
 }
 
-$cargoJson = & cargo.exe metadata --offline --locked --format-version 1 --manifest-path $rustManifest 2>$null
-if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
-$cargoMetadata = $cargoJson | ConvertFrom-Json -AsHashtable
+# Windows PowerShell 5.1 cannot parse Cargo's full JSON when nested metadata
+# contains keys that differ only by case. Its native stdout decoding can also
+# corrupt Unicode author names. Let Node invoke Cargo and project its fields.
+$cargoPackageJson = & node.exe (Join-Path $PSScriptRoot 'Project-CargoPackages.js') $rustManifest
+if ($LASTEXITCODE -ne 0) { throw 'cargo package metadata projection failed' }
+$cargoMetadata = $cargoPackageJson | ConvertFrom-Json
 $rustPackages = @(
-    foreach ($package in $cargoMetadata['packages']) {
-        $license = [string]$package['license']
-        Assert-License "$($package['name'])@$($package['version'])" $license
+    foreach ($package in $cargoMetadata.packages) {
+        $license = [string]$package.license
+        Assert-License "$($package.name)@$($package.version)" $license
         [ordered]@{
-            name = [string]$package['name']
-            version = [string]$package['version']
+            name = [string]$package.name
+            version = [string]$package.version
             license = $license
-            authors = @($package['authors'])
-            repository = [string]$package['repository']
-            source = [string]$package['source']
+            authors = @($package.authors)
+            repository = [string]$package.repository
+            source = [string]$package.source
         }
     }
 ) | Sort-Object { $_.name }, { $_.version }, { $_.source }
