@@ -27,7 +27,7 @@ foreach ($required in @(
 
 $cargoToml = Get-Content -LiteralPath (Join-Path $repoRoot 'app\src-tauri\Cargo.toml') -Raw
 Assert-True ($cargoToml -match '(?m)^license = "MIT"$') 'Rust package metadata must declare MIT'
-Assert-True ($cargoToml -match '(?m)^repository = "https://github.com/RRJJ0/OsuBeatforge"$') 'Rust package repository is missing or unexpected'
+Assert-True ($cargoToml -match '(?m)^repository = "https://github.com/RRJJ0/Beatforge"\r?$') 'Rust package repository is missing or unexpected'
 
 $bundle = Get-Content -LiteralPath (Join-Path $repoRoot 'app\src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json
 $resources = $bundle.bundle.resources
