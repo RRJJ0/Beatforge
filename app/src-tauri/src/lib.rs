@@ -18,6 +18,7 @@ mod diagnostics;
 mod downloads;
 mod environment;
 mod formal_worker;
+mod gpu_compatibility;
 mod install_recovery;
 mod jobs;
 mod mapperatorinator;
@@ -65,6 +66,7 @@ struct GpuInfo {
     memory_total_mb: Option<u64>,
     memory_free_mb: Option<u64>,
     driver_version: Option<String>,
+    compute_capability: Option<String>,
     available: bool,
 }
 
@@ -80,6 +82,7 @@ struct SystemInfo {
     available_memory_mb: u64,
     available_disk_gb: u64,
     gpu: GpuInfo,
+    gpu_compatibility: gpu_compatibility::GpuCompatibility,
 }
 
 #[derive(Debug, Serialize)]
@@ -611,34 +614,79 @@ pub(crate) fn open_database(app: &AppHandle) -> Result<(Connection, AppPaths), S
     Ok((connection, paths))
 }
 
-fn detect_gpu() -> GpuInfo {
+fn query_nvidia_smi(query: &str) -> Option<String> {
     let output = Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=name,memory.total,memory.free,driver_version",
-            "--format=csv,noheader,nounits",
-        ])
-        .output();
-    if let Ok(output) = output
-        && output.status.success()
-        && let Some(line) = String::from_utf8_lossy(&output.stdout).lines().next()
-    {
-        let fields: Vec<&str> = line.split(',').map(str::trim).collect();
-        if fields.len() >= 4 {
-            return GpuInfo {
-                name: fields[0].into(),
-                memory_total_mb: fields[1].parse().ok(),
-                memory_free_mb: fields[2].parse().ok(),
-                driver_version: Some(fields[3].into()),
-                available: true,
-            };
-        }
+        .args([query, "--format=csv,noheader,nounits"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .map(str::to_owned)
+}
+
+fn parse_gpu_line(line: &str) -> Option<GpuInfo> {
+    let fields: Vec<&str> = line.split(',').map(str::trim).collect();
+    (fields.len() >= 4).then(|| GpuInfo {
+        name: fields[0].into(),
+        memory_total_mb: fields[1].parse().ok(),
+        memory_free_mb: fields[2].parse().ok(),
+        driver_version: Some(fields[3].into()),
+        compute_capability: fields.get(4).map(|value| (*value).into()),
+        available: true,
+    })
+}
+
+fn detect_gpu() -> GpuInfo {
+    let result =
+        query_nvidia_smi("--query-gpu=name,memory.total,memory.free,driver_version,compute_cap")
+            .and_then(|line| parse_gpu_line(&line))
+            .or_else(|| {
+                query_nvidia_smi("--query-gpu=name,memory.total,memory.free,driver_version")
+                    .and_then(|line| parse_gpu_line(&line))
+            });
+    if let Some(gpu) = result {
+        return gpu;
     }
     GpuInfo {
         name: "No NVIDIA GPU detected".into(),
         memory_total_mb: None,
         memory_free_mb: None,
         driver_version: None,
+        compute_capability: None,
         available: false,
+    }
+}
+
+fn gpu_facts(gpu: &GpuInfo) -> gpu_compatibility::GpuFacts<'_> {
+    gpu_compatibility::GpuFacts {
+        available: gpu.available,
+        memory_total_mb: gpu.memory_total_mb,
+        memory_free_mb: gpu.memory_free_mb,
+        driver_version: gpu.driver_version.as_deref(),
+        compute_capability: gpu.compute_capability.as_deref(),
+    }
+}
+
+#[cfg(test)]
+mod gpu_probe_tests {
+    use super::*;
+
+    #[test]
+    fn parses_extended_and_legacy_nvidia_smi_rows() {
+        let extended = parse_gpu_line("NVIDIA GeForce RTX 4070, 12282, 9867, 610.88, 8.9")
+            .expect("extended NVIDIA row");
+        assert_eq!(extended.memory_total_mb, Some(12_282));
+        assert_eq!(extended.driver_version.as_deref(), Some("610.88"));
+        assert_eq!(extended.compute_capability.as_deref(), Some("8.9"));
+
+        let legacy =
+            parse_gpu_line("NVIDIA GeForce MX450, 2048, 1800, 573.91").expect("legacy NVIDIA row");
+        assert_eq!(legacy.memory_free_mb, Some(1_800));
+        assert_eq!(legacy.compute_capability, None);
     }
 }
 
@@ -663,6 +711,8 @@ fn get_system_info() -> SystemInfo {
         .first()
         .map(|cpu| cpu.brand().trim().to_string())
         .unwrap_or_else(|| "Unknown CPU".into());
+    let gpu = detect_gpu();
+    let gpu_compatibility = gpu_compatibility::assess(gpu_facts(&gpu));
     SystemInfo {
         os_name: System::name().unwrap_or_else(|| "Windows".into()),
         os_version: System::os_version().unwrap_or_else(|| "Unknown".into()),
@@ -672,7 +722,8 @@ fn get_system_info() -> SystemInfo {
         total_memory_mb: system.total_memory() / 1024 / 1024,
         available_memory_mb: system.available_memory() / 1024 / 1024,
         available_disk_gb: available_disk / 1024 / 1024 / 1024,
-        gpu: detect_gpu(),
+        gpu,
+        gpu_compatibility,
     }
 }
 
@@ -1068,6 +1119,9 @@ fn build_production_request(
         .ok_or_else(|| "Installed model has no managed path".to_string())?;
     let runtime_root = PathBuf::from(&paths.runtime);
     let gpu = detect_gpu();
+    if settings.device == "cuda" {
+        gpu_compatibility::cuda_preflight(gpu_facts(&gpu))?;
+    }
     let source_path = mapperatorinator::managed_source_path(&runtime_root)?;
     let source_commit = mapperatorinator_lock::builtin()?.source.commit;
     let context = request_adapter::AdapterContext {
@@ -1095,6 +1149,11 @@ fn create_job(
     input: protocol::StartJobInput,
 ) -> Result<jobs::JobRecord, String> {
     validate_job_input(&input)?;
+    let settings = load_settings_value(&app)?;
+    if settings.device == "cuda" {
+        let gpu = detect_gpu();
+        gpu_compatibility::cuda_preflight(gpu_facts(&gpu))?;
+    }
     let id = next_job_id();
     let (connection, _) = open_database(&app)?;
     let record = jobs::insert(&connection, &id, &input)?;
@@ -1712,14 +1771,20 @@ async fn diagnose_ai_environment(
     let paths = build_paths(&app)?;
     let runtime_root = PathBuf::from(paths.runtime);
     let gpu = detect_gpu();
-    let gpu_name = gpu.available.then_some(gpu.name);
-    let driver_version = gpu.driver_version;
+    let gpu_name = gpu.available.then_some(gpu.name.clone());
+    let gpu_memory_total_mb = gpu.memory_total_mb;
+    let gpu_memory_free_mb = gpu.memory_free_mb;
+    let driver_version = gpu.driver_version.clone();
+    let compute_capability = gpu.compute_capability.clone();
     tauri::async_runtime::spawn_blocking(move || {
         environment::diagnose(
             python.as_deref(),
             Some(&runtime_root),
             gpu_name,
+            gpu_memory_total_mb,
+            gpu_memory_free_mb,
             driver_version,
+            compute_capability,
         )
     })
     .await
@@ -1772,8 +1837,14 @@ async fn install_ai_dependencies(
         let runtime_root = PathBuf::from(paths.runtime);
         let cache_root = PathBuf::from(paths.cache);
         let gpu = detect_gpu();
-        let gpu_name = gpu.available.then_some(gpu.name);
-        let driver_version = gpu.driver_version;
+        if backend != environment::ComputeBackend::Cpu {
+            gpu_compatibility::cuda_preflight(gpu_facts(&gpu))?;
+        }
+        let gpu_name = gpu.available.then_some(gpu.name.clone());
+        let gpu_memory_total_mb = gpu.memory_total_mb;
+        let gpu_memory_free_mb = gpu.memory_free_mb;
+        let driver_version = gpu.driver_version.clone();
+        let compute_capability = gpu.compute_capability.clone();
         let worker_app = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             environment::install_dependencies(&worker_app, &python, backend)?;
@@ -1789,7 +1860,10 @@ async fn install_ai_dependencies(
                 Some(&python),
                 Some(&runtime_root),
                 gpu_name,
+                gpu_memory_total_mb,
+                gpu_memory_free_mb,
                 driver_version,
+                compute_capability,
             ))
         })
         .await

@@ -89,12 +89,33 @@ async function removeModel(model: ManagedPackage) {
   }
 }
 
-const backendOptions = [
-  { label: 'CUDA 13.0', value: 'cuda130' },
-  { label: 'CUDA 12.8', value: 'cuda128' },
-  { label: 'CUDA 12.6', value: 'cuda126' },
-  { label: 'CPU only', value: 'cpu' },
-]
+const backendOptions = computed(() => {
+  const cudaDisabled = environmentStore.diagnostics?.compatibility.canGenerateWithCuda === false
+  return [
+    { label: 'CUDA 13.0', value: 'cuda130', disabled: cudaDisabled },
+    { label: 'CUDA 12.8', value: 'cuda128', disabled: cudaDisabled },
+    { label: 'CUDA 12.6', value: 'cuda126', disabled: cudaDisabled },
+    { label: 'CPU only', value: 'cpu' },
+  ] satisfies Array<{ label: string; value: ComputeBackend; disabled?: boolean }>
+})
+
+const compatibilityTagType = computed(() => {
+  switch (environmentStore.diagnostics?.compatibility.tier) {
+    case 'recommended':
+      return 'success'
+    case 'minimum':
+      return 'warning'
+    case 'unsupported':
+      return 'error'
+    default:
+      return 'default'
+  }
+})
+
+const compatibilityTierLabel = computed(() => {
+  const tier = environmentStore.diagnostics?.compatibility.tier
+  return tier ? t(`models.gpuTier.${tier}`) : t('common.checking')
+})
 
 const diagnosticItems = computed(() => {
   const data = environmentStore.diagnostics
@@ -296,6 +317,25 @@ onMounted(async () => {
         </NButton>
       </div>
     </div>
+    <div v-if="environmentStore.diagnostics" class="compatibility-panel">
+      <div class="compatibility-title">
+        <strong>{{ t('models.gpuCompatibility') }}</strong>
+        <NTag size="small" round :type="compatibilityTagType">{{ compatibilityTierLabel }}</NTag>
+      </div>
+      <div class="compatibility-facts">
+        <span>{{ t('models.gpuArchitecture') }} <strong>{{ environmentStore.diagnostics.compatibility.architecture }}</strong></span>
+        <span>{{ t('models.gpuVram') }} <strong>{{ environmentStore.diagnostics.gpuMemoryTotalMb ? `${environmentStore.diagnostics.gpuMemoryTotalMb} MiB` : '—' }}</strong></span>
+        <span>{{ t('models.gpuFreeVram') }} <strong>{{ environmentStore.diagnostics.gpuMemoryFreeMb ? `${environmentStore.diagnostics.gpuMemoryFreeMb} MiB` : '—' }}</strong></span>
+        <span>BF16 <strong>{{ environmentStore.diagnostics.compatibility.bf16Supported ? t('models.nativeSupported') : t('models.fp32Fallback') }}</strong></span>
+      </div>
+      <NAlert
+        v-if="environmentStore.diagnostics.compatibility.recommendations.length"
+        :type="environmentStore.diagnostics.compatibility.canGenerateWithCuda ? 'info' : 'warning'"
+        class="compatibility-advice"
+      >
+        {{ environmentStore.diagnostics.compatibility.recommendations.join(' ') }}
+      </NAlert>
+    </div>
     <div class="diagnostic-grid">
       <div v-for="item in diagnosticItems" :key="item.name" class="diagnostic-item">
         <span>{{ item.name }}</span>
@@ -426,6 +466,39 @@ onMounted(async () => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 16px;
+}
+.compatibility-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid rgba(133, 141, 160, 0.16);
+  border-radius: 10px;
+}
+.compatibility-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+}
+.compatibility-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  color: #858da0;
+  font-size: 9px;
+}
+.compatibility-facts span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.compatibility-facts strong {
+  color: var(--text-color-2);
+  font-size: 10px;
+}
+.compatibility-advice {
+  margin-top: 10px;
 }
 .diagnostic-item {
   display: flex;

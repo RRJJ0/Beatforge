@@ -633,6 +633,15 @@ mod tests {
     }
 
     fn system() -> SystemInfo {
+        let gpu = GpuInfo {
+            name: "Test GPU".into(),
+            memory_total_mb: Some(8_192),
+            memory_free_mb: Some(4_096),
+            driver_version: Some("999.1".into()),
+            compute_capability: Some("8.9".into()),
+            available: true,
+        };
+        let gpu_compatibility = crate::gpu_compatibility::assess(crate::gpu_facts(&gpu));
         SystemInfo {
             os_name: "Windows".into(),
             os_version: "Test".into(),
@@ -642,13 +651,8 @@ mod tests {
             total_memory_mb: 16_384,
             available_memory_mb: 8_192,
             available_disk_gb: 100,
-            gpu: GpuInfo {
-                name: "Test GPU".into(),
-                memory_total_mb: Some(8_192),
-                memory_free_mb: Some(4_096),
-                driver_version: Some("999.1".into()),
-                available: true,
-            },
+            gpu,
+            gpu_compatibility,
         }
     }
 

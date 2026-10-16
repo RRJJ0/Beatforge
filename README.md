@@ -857,7 +857,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - [x] 9.4：完成第三方依賴、模型與資料授權盤點。
 - [x] 9.5：建立可簽章的 Windows installer 與乾淨環境安裝流程。
 - [x] 9.6：建立自動更新、降級、離線啟動與環境修復流程。
-- [ ] 9.7：建立 NVIDIA GPU、顯存與驅動支援矩陣。
+- [x] 9.7：建立 NVIDIA GPU、顯存與驅動支援矩陣。
 - [ ] 9.8：建立 release pipeline，並完成 release candidate 實機驗收。
 
 #### 9.1 發布測試基線
@@ -937,6 +937,10 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - 將最低需求、推薦規格與僅部分驗證的組合分開標示，避免把未測試硬體宣稱為已支援。
 
 驗收：完成至少最低規格、主要開發／推薦規格與一組低顯存情境的實機紀錄；UI 診斷結果與發布文件中的支援矩陣一致。
+
+實作結果：新增單一 Rust GPU compatibility policy，依 NVIDIA driver、compute capability、總顯存與當下可用顯存回傳 `recommended`、`minimum`、`partially_tested` 或 `unsupported`；最低 CUDA 基線為 driver 560.76、compute capability 7.5 與 2 GiB VRAM，推薦為 8 GiB 以上，低於 1536 MiB 可用顯存則暫停 CUDA 啟動並提示關閉 GPU-heavy 應用程式。Models 頁面顯示架構、總／可用顯存、BF16 能力、分級與改善建議；無法通過時會停用 CUDA package 選項，dependency install 與建立 job 也會在推論前拒絕並回報具體原因。診斷 ZIP 的 `system.json` 使用同一份判定結果。
+
+實機矩陣已記錄 RTX 4070 12 GiB／driver 610.88／native BF16 的推薦環境，以及先前 MX450 2 GiB／driver 573.91／FP32 fallback 的最低兼低顯存環境；兩者皆完成安裝與模型載入，並保存單／多難度耗時、peak VRAM、穩定性及限制。未實測的 3–7 GiB、Blackwell、Windows 10、hybrid／multi-GPU 等組合明確列為未驗證，不以 policy fixture 冒充實機通過。完整數據、後續設備驗收步驟與 release blocker 見 `docs/testing/stage-9-gpu-support-matrix.md` 及其 machine-readable JSON；`scripts/Test-GpuCompatibilityPolicy.ps1` 會在 release gate 確認文件、閾值與實機證據同步。
 
 #### 9.8 Release Pipeline 與候選版驗收
 

@@ -1,4 +1,4 @@
-use crate::mapperatorinator;
+use crate::{gpu_compatibility, mapperatorinator};
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -58,10 +58,14 @@ pub struct EnvironmentDiagnostics {
     pub mapperatorinator: ComponentDiagnostic,
     pub inference_dependencies: ComponentDiagnostic,
     pub gpu_name: Option<String>,
+    pub gpu_memory_total_mb: Option<u64>,
+    pub gpu_memory_free_mb: Option<u64>,
     pub driver_version: Option<String>,
+    pub compute_capability: Option<String>,
     pub cuda_available: bool,
     pub recommended_backend: ComputeBackend,
     pub compatibility_reason: String,
+    pub compatibility: gpu_compatibility::GpuCompatibility,
     pub ready: bool,
 }
 
@@ -193,10 +197,24 @@ pub fn diagnose(
     python: Option<&Path>,
     runtime_root: Option<&Path>,
     gpu_name: Option<String>,
+    gpu_memory_total_mb: Option<u64>,
+    gpu_memory_free_mb: Option<u64>,
     driver_version: Option<String>,
+    compute_capability: Option<String>,
 ) -> EnvironmentDiagnostics {
-    let (recommended_backend, compatibility_reason) =
+    let compatibility = gpu_compatibility::assess(gpu_compatibility::GpuFacts {
+        available: gpu_name.is_some(),
+        memory_total_mb: gpu_memory_total_mb,
+        memory_free_mb: gpu_memory_free_mb,
+        driver_version: driver_version.as_deref(),
+        compute_capability: compute_capability.as_deref(),
+    });
+    let (mut recommended_backend, _) =
         recommend_backend(gpu_name.is_some(), driver_version.as_deref());
+    if !compatibility.can_generate_with_cuda {
+        recommended_backend = ComputeBackend::Cpu;
+    }
+    let compatibility_reason = compatibility.summary.clone();
     let Some(python) = python else {
         let runtime_error = "Install the private Python runtime first";
         return EnvironmentDiagnostics {
@@ -207,10 +225,14 @@ pub fn diagnose(
             mapperatorinator: missing(runtime_error),
             inference_dependencies: missing(runtime_error),
             gpu_name,
+            gpu_memory_total_mb,
+            gpu_memory_free_mb,
             driver_version,
+            compute_capability,
             cuda_available: false,
             recommended_backend,
             compatibility_reason,
+            compatibility,
             ready: false,
         };
     };
@@ -267,7 +289,7 @@ pub fn diagnose(
         && pytorch.installed
         && mapperatorinator.installed
         && inference_dependencies.installed
-        && (!expects_cuda || cuda_available);
+        && (!expects_cuda || (cuda_available && compatibility.can_generate_with_cuda));
 
     EnvironmentDiagnostics {
         python: python_info,
@@ -277,10 +299,14 @@ pub fn diagnose(
         mapperatorinator,
         inference_dependencies,
         gpu_name,
+        gpu_memory_total_mb,
+        gpu_memory_free_mb,
         driver_version,
+        compute_capability,
         cuda_available,
         recommended_backend,
         compatibility_reason,
+        compatibility,
         ready,
     }
 }

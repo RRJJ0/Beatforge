@@ -223,6 +223,16 @@ export interface ModelInfo {
 }
 
 export type ComputeBackend = 'cuda130' | 'cuda128' | 'cuda126' | 'cpu'
+export type GpuSupportTier = 'recommended' | 'minimum' | 'partially_tested' | 'unsupported'
+
+export interface GpuCompatibility {
+  tier: GpuSupportTier
+  canGenerateWithCuda: boolean
+  bf16Supported: boolean
+  architecture: string
+  summary: string
+  recommendations: string[]
+}
 
 export interface ComponentDiagnostic {
   installed: boolean
@@ -239,10 +249,14 @@ export interface EnvironmentDiagnostics {
   mapperatorinator: ComponentDiagnostic
   inferenceDependencies: ComponentDiagnostic
   gpuName?: string
+  gpuMemoryTotalMb?: number
+  gpuMemoryFreeMb?: number
   driverVersion?: string
+  computeCapability?: string
   cudaAvailable: boolean
   recommendedBackend: ComputeBackend
   compatibilityReason: string
+  compatibility: GpuCompatibility
   ready: boolean
 }
 
@@ -286,6 +300,7 @@ export interface GpuInfo {
   memoryTotalMb?: number
   memoryFreeMb?: number
   driverVersion?: string
+  computeCapability?: string
   available: boolean
 }
 
@@ -299,6 +314,7 @@ export interface SystemInfo {
   availableMemoryMb: number
   availableDiskGb: number
   gpu: GpuInfo
+  gpuCompatibility: GpuCompatibility
 }
 
 export interface OsuInstallation {

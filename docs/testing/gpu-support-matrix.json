@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-16",
+  "policy": {
+    "minimumDriver": "560.76",
+    "minimumComputeCapability": "7.5",
+    "bf16ComputeCapability": "8.0",
+    "minimumVramMb": 2048,
+    "recommendedVramMb": 8192,
+    "minimumFreeVramMb": 1536
+  },
+  "physicalRecords": [
+    {
+      "tier": "recommended",
+      "gpu": "NVIDIA GeForce RTX 4070",
+      "architecture": "Ada Lovelace",
+      "computeCapability": "8.9",
+      "vramMb": 12282,
+      "driver": "595.97 and 610.88",
+      "windows": "Windows 11 build 26300",
+      "precision": "bf16",
+      "install": "pass",
+      "modelLoad": "pass",
+      "peakVramMb": 1175.2,
+      "singleDifficultySeconds": "154.6-172.5",
+      "multiDifficulty": "2-4 difficulties passed; recorded total inference time 278.5-998.6 seconds",
+      "stability": "Multiple completed production jobs; 2-4 difficulties per set",
+      "evidence": "Local persisted production provenance and Stage 7 product acceptance"
+    },
+    {
+      "tier": "minimum_low_vram",
+      "gpu": "NVIDIA GeForce MX450",
+      "architecture": "Turing",
+      "computeCapability": "7.5",
+      "vramMb": 2048,
+      "driver": "573.91",
+      "windows": "Windows, exact build not captured",
+      "precision": "fp32 fallback",
+      "install": "pass",
+      "modelLoad": "pass",
+      "peakVramMb": 1636.4,
+      "singleDifficultySeconds": "212.201-221.941",
+      "multiDifficulty": "not physically recorded",
+      "stability": "Two reproducible production runs passed",
+      "evidence": "Stage 5 GPU acceptance"
+    }
+  ]
+}

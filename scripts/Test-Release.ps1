@@ -94,6 +94,9 @@ try {
     Invoke-ReleaseStep 'Update and downgrade policy' {
         & (Join-Path $PSScriptRoot 'Test-UpdatePolicy.ps1')
     }
+    Invoke-ReleaseStep 'GPU compatibility policy' {
+        & (Join-Path $PSScriptRoot 'Test-GpuCompatibilityPolicy.ps1')
+    }
 
     Push-Location $appRoot
     try {
