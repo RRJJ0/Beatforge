@@ -46,13 +46,15 @@ in a disposable account/VM, never an account containing real Beatforge data.
 | Export diagnostics and inspect for song/private data | Pending |
 | Reinstall preserves settings, models, jobs and outputs | Pending |
 | Uninstall preserves user data and removes program | Pending |
-| Older version to newer updater-signed artifact from real HTTPS endpoint | Pending |
+| Older version to newer updater-signed artifact from real HTTPS endpoint | User reported pass on 2026-10-17: `0.0.9` → `0.1.0` via isolated `https://localhost:48765/latest.json`. Local bundle: `artifacts/update-acceptance/localhost-20261016` (ignored); target installer SHA-256 `561f406708bc1ce383dc353f3c9d54d6e4f5769bb11eb48bb7b5b0b6959cfd7d`. Windows build, test-account details, and screenshots/logs not yet attached. Production GitHub endpoint remains untested until publication. |
 | Interrupted update/download and offline recovery | Pending |
 | Downgrade/future-schema rejection without data writes | Pending |
 
 For updater acceptance, use two distinct SemVer builds and the actual embedded
 public key; changing `latest.json` alone is not an update test. Keep the older
 installer, both manifests and an export/backup of app data for recovery.
+Use the [isolated HTTPS updater acceptance procedure](update-acceptance.md) to
+prepare and verify the two-version test without changing the production endpoint.
 
 ## Rollback and repair
 
