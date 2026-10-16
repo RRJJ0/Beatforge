@@ -38,7 +38,7 @@ foreach ($pair in $pairs) {
     }
     foreach ($path in @($englishPath, $chinesePath)) {
         $source = Get-Content -LiteralPath $path -Raw
-        foreach ($match in [regex]::Matches($source, '(?<!\!)\[[^\]]+\]\(([^)]+)\)')) {
+        foreach ($match in [regex]::Matches($source, '!?\[[^\]]+\]\(([^)]+)\)')) {
             $target = $match.Groups[1].Value.Split('#')[0]
             if ([string]::IsNullOrWhiteSpace($target) -or $target -match '^[a-z][a-z0-9+.-]*://' -or $target.StartsWith('mailto:')) {
                 continue

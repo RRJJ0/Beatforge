@@ -17,10 +17,19 @@ settings, jobs, and output are stored under the managed app-data directory,
 separately from the installed program. Already verified components can be used
 offline. See [requirements](requirements.md) if GPU setup is unavailable.
 
+![Models page showing runtime, AI environment, and model status](../demoImage/model.png)
+
 In **Settings**, review the processing device, precision, osu! executable,
 automatic import, output options, and language. If osu! is not detected,
 select its executable manually. Settings also contains update checks, storage
 cleanup, and diagnostic export.
+
+![Settings page showing output, compute, and application options](../demoImage/setting-1.png)
+
+The lower part of **Settings** contains storage cleanup, diagnostic export,
+update preferences, and backup/reset controls.
+
+![Settings page showing storage management and backup controls](../demoImage/setting-2.png)
 
 ## Create a beatmap draft
 
@@ -35,6 +44,15 @@ cleanup, and diagnostic export.
    hitsounds. The target rating is a request to the model, not a guarantee.
 4. Select **Generate**. Jobs run one at a time. The **Jobs** page shows progress
    and validation. You can review earlier jobs in **History**.
+
+![Generate page showing song assets and difficulty controls](../demoImage/generate.png)
+
+**Jobs** shows the queue and each difficulty's validation status. **History**
+lets you search and reopen previous jobs.
+
+![Jobs page showing completed results and per-difficulty status](../demoImage/jobs.png)
+
+![History page showing searchable previous jobs](../demoImage/history.png)
 
 ## Review and import
 
