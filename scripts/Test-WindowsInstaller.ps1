@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$ArtifactDirectory,
-    [switch]$RequireSignature
+    [switch]$RequireSignature,
+    [switch]$RequirePublicRelease
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,12 @@ function Assert-True([bool]$Condition, [string]$Message) {
 
 $base = Get-Content -LiteralPath $baseConfigPath -Raw | ConvertFrom-Json
 $windows = Get-Content -LiteralPath $windowsConfigPath -Raw | ConvertFrom-Json
+$releaseNotesPath = Join-Path $repoRoot 'docs\release\release-notes.md'
+$releaseNotes = Get-Content -LiteralPath $releaseNotesPath -Raw
+Assert-True ($releaseNotes -match ('(?m)^# Beatforge ' + [regex]::Escape([string]$base.version) + ' release candidate notes$')) 'Release notes version must match the application version'
+foreach ($document in @('docs\release\known-issues.md', 'docs\release\release-candidate-runbook.md', 'docs\testing\stage-9-gpu-support-matrix.md')) {
+    Assert-True (Test-Path -LiteralPath (Join-Path $repoRoot $document) -PathType Leaf) "Release document is missing: $document"
+}
 
 Assert-True ($base.productName -eq 'Beatforge') 'Unexpected Windows product name'
 Assert-True ($base.mainBinaryName -eq 'Beatforge') 'The installed executable must be named Beatforge.exe'
@@ -51,7 +58,7 @@ Assert-True ($installers.Count -eq 1) 'Expected exactly one NSIS setup executabl
 Assert-True ($applications.Count -eq 1) 'Expected exactly one standalone Beatforge executable'
 Assert-True ($updaterSignatures.Count -eq 1) 'Expected exactly one signed updater artifact'
 
-foreach ($required in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'dependency-inventory.json', 'latest.json', 'SHA256SUMS.txt', 'build-provenance.json')) {
+foreach ($required in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'dependency-inventory.json', 'RELEASE_NOTES.md', 'KNOWN_ISSUES.md', 'GPU_SUPPORT_MATRIX.md', 'RELEASE_CANDIDATE_RUNBOOK.md', 'latest.json', 'SHA256SUMS.txt', 'build-provenance.json')) {
     Assert-True (Test-Path -LiteralPath (Join-Path $artifactRoot $required) -PathType Leaf) "Release artifact is missing $required"
 }
 
@@ -59,9 +66,13 @@ $checksumLines = Get-Content -LiteralPath (Join-Path $artifactRoot 'SHA256SUMS.t
 $checksumEntries = @{}
 foreach ($line in $checksumLines) {
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Malformed checksum line: $line" }
+    Assert-True (-not $checksumEntries.ContainsKey($Matches[2])) "Duplicate checksum entry: $($Matches[2])"
     $checksumEntries[$Matches[2]] = $Matches[1]
 }
-foreach ($file in Get-ChildItem -LiteralPath $artifactRoot -File | Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'build-provenance.json') }) {
+$artifactFiles = @(Get-ChildItem -LiteralPath $artifactRoot -File)
+$hashedFiles = @($artifactFiles | Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'build-provenance.json') })
+Assert-True ($checksumEntries.Count -eq $hashedFiles.Count) 'Checksum manifest has missing or extra entries'
+foreach ($file in $hashedFiles) {
     Assert-True ($checksumEntries.ContainsKey($file.Name)) "No checksum recorded for $($file.Name)"
     $actual = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-True ($actual -eq $checksumEntries[$file.Name]) "Checksum mismatch for $($file.Name)"
@@ -72,6 +83,34 @@ Assert-True ($provenance.schemaVersion -eq 1) 'Unsupported build provenance sche
 Assert-True ($provenance.product -eq 'Beatforge') 'Unexpected product in build provenance'
 Assert-True ($provenance.version -eq $base.version) 'Artifact version does not match Tauri configuration'
 Assert-True ($provenance.gitCommit -match '^[0-9a-f]{40}$') 'Build provenance has no full Git commit'
+Assert-True ($provenance.signed -eq $RequireSignature.IsPresent) 'Build provenance signing state differs from the required artifact state'
+$releaseMode = if ($null -ne $provenance.PSObject.Properties['releaseMode']) {
+    [string]$provenance.releaseMode
+} elseif ($provenance.signed) {
+    'signed'
+} else {
+    'local-smoke'
+}
+Assert-True ($releaseMode -in @('signed', 'unsigned-public', 'local-smoke')) 'Unknown release mode in build provenance'
+Assert-True (($releaseMode -eq 'signed') -eq $RequireSignature.IsPresent) 'Release mode and Authenticode policy disagree'
+if ($releaseMode -ne 'local-smoke') {
+    Assert-True (-not $provenance.sourceDirty) 'A public release must come from a clean source revision'
+}
+if ($RequirePublicRelease) {
+    Assert-True ($null -ne $provenance.PSObject.Properties['releaseMode']) 'Public releases require an explicit release mode'
+    Assert-True ($releaseMode -ne 'local-smoke') 'Local smoke artifacts are not publishable'
+}
+if ($releaseMode -eq 'unsigned-public') {
+    $notes = Get-Content -LiteralPath (Join-Path $artifactRoot 'RELEASE_NOTES.md') -Raw
+    Assert-True ($notes.Contains('Windows Authenticode unsigned')) 'Unsigned public release notes must disclose the missing Windows Publisher signature'
+}
+Assert-True (@($provenance.artifacts).Count -eq $hashedFiles.Count) 'Build provenance artifact list is incomplete'
+foreach ($file in $hashedFiles) {
+    $record = @($provenance.artifacts | Where-Object { $_.file -eq $file.Name })
+    Assert-True ($record.Count -eq 1) "Build provenance must contain exactly one entry for $($file.Name)"
+    Assert-True ($record[0].sizeBytes -eq $file.Length) "Build provenance size mismatch for $($file.Name)"
+    Assert-True ($record[0].sha256 -eq $checksumEntries[$file.Name]) "Build provenance hash mismatch for $($file.Name)"
+}
 
 $updateManifest = Get-Content -LiteralPath (Join-Path $artifactRoot 'latest.json') -Raw | ConvertFrom-Json
 $windowsUpdate = $updateManifest.platforms.'windows-x86_64'
@@ -80,10 +119,22 @@ Assert-True ($windowsUpdate.url -match '^https://') 'Update artifact URL must us
 Assert-True ($windowsUpdate.url.EndsWith($installers[0].Name)) 'Update manifest URL does not name the generated installer'
 Assert-True ($windowsUpdate.signature -eq (Get-Content -LiteralPath $updaterSignatures[0].FullName -Raw).Trim()) 'Update manifest signature differs from the generated signature'
 
+Push-Location (Join-Path $repoRoot 'app\src-tauri')
+try {
+    & cargo.exe run --quiet --release --example verify_update_artifact -- $baseConfigPath $installers[0].FullName $updaterSignatures[0].FullName ([string]$base.version)
+    if ($LASTEXITCODE -ne 0) { throw 'Updater artifact cryptographic signature verification failed' }
+}
+finally {
+    Pop-Location
+}
+
 foreach ($executable in @($installers[0], $applications[0])) {
     $signature = Get-AuthenticodeSignature -LiteralPath $executable.FullName
     if ($RequireSignature) {
         Assert-True ($signature.Status -eq 'Valid') "Authenticode signature is not valid: $($executable.Name) ($($signature.Status))"
+        $signatureRecord = @($provenance.signatures | Where-Object { $_.file -eq $executable.Name })
+        Assert-True ($signatureRecord.Count -eq 1) "Missing signer provenance for $($executable.Name)"
+        Assert-True ($signatureRecord[0].signerThumbprint -eq $signature.SignerCertificate.Thumbprint) "Signer changed for $($executable.Name)"
     }
     elseif ($signature.Status -notin @('Valid', 'NotSigned')) {
         throw "Unexpected Authenticode state: $($executable.Name) ($($signature.Status))"

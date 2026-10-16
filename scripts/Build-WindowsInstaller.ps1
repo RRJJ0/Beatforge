@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$AllowUnsigned,
+    [switch]$AllowUnsignedPublicRelease,
     [switch]$AllowDirty,
     [switch]$SkipTests,
     [switch]$TimestampUsesRfc3161,
@@ -22,6 +23,10 @@ $transientRoot = Join-Path $rustRoot '.release'
 $signingConfigPath = Join-Path $transientRoot "signing-$PID.json"
 $stagingDirectory = $null
 $previousUpdaterPrivateKey = $env:TAURI_SIGNING_PRIVATE_KEY
+
+if ($AllowUnsignedPublicRelease -and -not $AllowUnsigned) {
+    throw '-AllowUnsignedPublicRelease requires -AllowUnsigned.'
+}
 
 function Assert-Tool([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -55,19 +60,22 @@ $gitCommit = (& git.exe -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $gitCommit -notmatch '^[0-9a-f]{40}$') { throw 'Unable to resolve the source commit' }
 $gitStatus = @(& git.exe -C $repoRoot status --porcelain)
 $sourceDirty = $gitStatus.Count -gt 0
-if ($sourceDirty -and -not $AllowDirty) { throw 'Refusing a release build from a dirty worktree. Commit changes or pass -AllowDirty for a local smoke build.' }
+if ($sourceDirty -and (-not $AllowDirty -or $AllowUnsignedPublicRelease)) {
+    throw 'A publishable build requires a clean committed source revision. -AllowDirty is only for local smoke builds.'
+}
 
-if ([string]::IsNullOrWhiteSpace($UpdaterPrivateKey)) {
+if ([string]::IsNullOrWhiteSpace($UpdaterPrivateKey) -and $AllowUnsigned -and -not $AllowUnsignedPublicRelease) {
     $localUpdaterKey = Join-Path $transientRoot 'beatforge-updater.key'
     if (Test-Path -LiteralPath $localUpdaterKey -PathType Leaf) {
         $UpdaterPrivateKey = $localUpdaterKey
     }
 }
 if ([string]::IsNullOrWhiteSpace($UpdaterPrivateKey)) {
-    throw 'Updater signing is mandatory. Set TAURI_SIGNING_PRIVATE_KEY or generate the ignored local development key documented for Stage 9.6.'
+    throw 'Updater signing is mandatory. Publishable builds require an explicit TAURI_SIGNING_PRIVATE_KEY or -UpdaterPrivateKey; only local smoke builds may fall back to the ignored development key.'
 }
 
 $signedBuild = -not $AllowUnsigned
+$releaseMode = if ($signedBuild) { 'signed' } elseif ($AllowUnsignedPublicRelease) { 'unsigned-public' } else { 'local-smoke' }
 $normalizedThumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
 if ($signedBuild) {
     if ($normalizedThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'Set BEATFORGE_WINDOWS_CERTIFICATE_THUMBPRINT to a 40-character SHA-1 certificate thumbprint.' }
@@ -157,6 +165,10 @@ try {
     Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $stagingDirectory 'LICENSE')
     Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md') -Destination (Join-Path $stagingDirectory 'THIRD_PARTY_NOTICES.md')
     Copy-Item -LiteralPath (Join-Path $repoRoot 'third_party\dependency-inventory.json') -Destination (Join-Path $stagingDirectory 'dependency-inventory.json')
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\release\release-notes.md') -Destination (Join-Path $stagingDirectory 'RELEASE_NOTES.md')
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\release\known-issues.md') -Destination (Join-Path $stagingDirectory 'KNOWN_ISSUES.md')
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\testing\stage-9-gpu-support-matrix.md') -Destination (Join-Path $stagingDirectory 'GPU_SUPPORT_MATRIX.md')
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\release\release-candidate-runbook.md') -Destination (Join-Path $stagingDirectory 'RELEASE_CANDIDATE_RUNBOOK.md')
 
     $signatureText = (Get-Content -LiteralPath $updaterSignature.FullName -Raw).Trim()
     if ([string]::IsNullOrWhiteSpace($signatureText)) { throw 'Updater signature is empty' }
@@ -207,6 +219,7 @@ try {
         sourceDirty = $sourceDirty
         builtAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         signed = $signedBuild
+        releaseMode = $releaseMode
         tools = [ordered]@{
             node = Get-CommandText { & node.exe --version }
             pnpm = Get-CommandText { & pnpm.cmd --version }
@@ -233,14 +246,14 @@ try {
     }
     [System.IO.File]::WriteAllText((Join-Path $stagingDirectory 'build-provenance.json'), ($provenance | ConvertTo-Json -Depth 8) + "`n", [System.Text.UTF8Encoding]::new($false))
 
-    & (Join-Path $PSScriptRoot 'Test-WindowsInstaller.ps1') -ArtifactDirectory $stagingDirectory -RequireSignature:$signedBuild
+    & (Join-Path $PSScriptRoot 'Test-WindowsInstaller.ps1') -ArtifactDirectory $stagingDirectory -RequireSignature:$signedBuild -RequirePublicRelease:$($releaseMode -ne 'local-smoke')
     if ($LASTEXITCODE -ne 0) { throw 'Generated artifact verification failed' }
 
     $finalParent = Split-Path -Parent $finalDirectory
     if (-not (Test-Path -LiteralPath $finalParent)) { New-Item -ItemType Directory -Path $finalParent -Force | Out-Null }
     Move-Item -LiteralPath $stagingDirectory -Destination $finalDirectory
     $stagingDirectory = $null
-    Write-Host "`nWindows release artifact ready: $finalDirectory" -ForegroundColor Green
+    Write-Host "`nWindows artifact ready ($releaseMode): $finalDirectory" -ForegroundColor Green
 }
 finally {
     $env:TAURI_SIGNING_PRIVATE_KEY = $previousUpdaterPrivateKey

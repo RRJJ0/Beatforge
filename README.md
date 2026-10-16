@@ -847,7 +847,7 @@ Accessibility checklist：Tab 可由 skip link 進入主內容；可鍵盤完成
 
 目標：在譜面集與媒體內容的基礎結構穩定後，建立可重現、可更新和可支援的 Windows 發布流程。
 
-Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱私安全的診斷／資料邊界、完整 Git 歷史掃描、Beatforge 專案 LICENSE、第三方 notices，以及 AI 生成與 osu! 上傳限制說明全部通過審查後，才轉為 Public Preview。公開原始碼不代表 installer 已可正式發布；簽章 installer、更新與 release candidate 仍依 9.5–9.8 的驗收進行。`app/package.json` 的 `private: true` 繼續保留，只用來防止前端套件被誤發布至 npm，與 GitHub repository visibility 無關。
+Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱私安全的診斷／資料邊界、完整 Git 歷史掃描、Beatforge 專案 LICENSE、第三方 notices，以及 AI 生成與 osu! 上傳限制說明全部通過審查後，才轉為 Public Preview。公開原始碼不代表 installer 已可正式發布；release candidate 仍依 9.5–9.8 的驗收進行。可選擇明確揭露未具 Windows Authenticode／已驗證 Publisher 的 unsigned-public 發布模式，但 updater 簽章及其餘驗收不可省略。`app/package.json` 的 `private: true` 繼續保留，只用來防止前端套件被誤發布至 npm，與 GitHub repository visibility 無關。
 
 規劃子項目：
 
@@ -911,12 +911,12 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 
 - 建立正式 Windows installer，定義支援的安裝範圍、捷徑、應用程式資料位置、WebView2／GPU 前置條件與安裝失敗復原。
 - 將大型 runtime 與模型維持在受管理資料目錄，由應用程式驗證後下載或修復，避免每次更新重複打包。
-- 建立 code signing 流程，對 installer、主程式與 updater artifact 簽章並保存 checksum、版本及 build provenance。
+- 建立可選的 Windows Authenticode signing 流程，對 updater artifact 必須簽章，並保存 checksum、版本及 build provenance；unsigned-public 需明確揭露限制。
 - 測試安裝、重新安裝與解除安裝；解除安裝不得在未明確告知時刪除使用者模型、設定、歷史與生成成果。
 
-驗收：全新支援的 Windows 環境可只透過 installer 啟動 Beatforge 並完成首次設定；checksum 與 build provenance 可驗證，失敗安裝可安全重試。正式 CA 憑證簽章、Publisher 與 SmartScreen 驗收延至 9.8 release candidate，不阻擋後續開發。
+驗收：全新支援的 Windows 環境可只透過 installer 啟動 Beatforge 並完成首次設定；checksum 與 build provenance 可驗證，失敗安裝可安全重試。正式 CA 憑證簽章可作為後續改善；9.8 可採明確揭露的 unsigned-public 模式，仍需記錄 Publisher／SmartScreen 實際行為。
 
-實作結果：Windows release 固定使用 x64、current-user NSIS installer，主程式命名為 `Beatforge.exe`，禁止 silent downgrade，內含 Visual C++ runtime，缺少 WebView2 時使用 bootstrapper 補齊。`scripts/Build-WindowsInstaller.ps1` 預設要求乾淨 Git revision、GPU-free release gate、有效 Code Signing certificate／timestamp 與兩個有效 Authenticode signatures；只有明確指定 `-AllowUnsigned` 才能產生不可發布的本機 smoke build。輸出會附 installer、standalone executable、LICENSE、third-party notices、dependency inventory、SHA-256 checksums 與不含私人路徑的 build provenance。`scripts/Test-WindowsInstaller.ps1` 已納入 release gate；`scripts/Test-WindowsInstallerLifecycle.ps1` 只允許在明確確認的 disposable Windows 帳號／VM 執行 install、首次啟動、reinstall、uninstall 及 user-data preservation 測試。完整建置、資料位置、失敗重試與乾淨環境驗收步驟見 `docs/release/windows-installer.md`。已產生並驗證 unsigned NSIS smoke artifact；正式 CA 憑證簽章及 Publisher／SmartScreen 驗收延至 9.8，不阻擋 9.6 與 9.7。
+實作結果：Windows release 固定使用 x64、current-user NSIS installer，主程式命名為 `Beatforge.exe`，禁止 silent downgrade，內含 Visual C++ runtime，缺少 WebView2 時使用 bootstrapper 補齊。`scripts/Build-WindowsInstaller.ps1` 的 signed 模式要求乾淨 Git revision、GPU-free release gate、有效 Code Signing certificate／timestamp 與兩個有效 Authenticode signatures；`-AllowUnsignedPublicRelease` 是需乾淨來源、明確揭露且 updater 必須驗簽的公開模式，單獨 `-AllowUnsigned` 仍只產生不可發布的本機 smoke build。輸出會附 installer、standalone executable、LICENSE、third-party notices、dependency inventory、SHA-256 checksums 與不含私人路徑的 build provenance。`scripts/Test-WindowsInstaller.ps1` 已納入 release gate；`scripts/Test-WindowsInstallerLifecycle.ps1` 只允許在明確確認的 disposable Windows 帳號／VM 執行 install、首次啟動、reinstall、uninstall 及 user-data preservation 測試。完整建置、資料位置、失敗重試與乾淨環境驗收步驟見 `docs/release/windows-installer.md`。
 
 #### 9.6 更新、降級、離線啟動與修復
 
@@ -927,7 +927,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 
 驗收：正常更新、更新中斷、簽章錯誤、離線啟動、支援範圍內降級與 runtime／model 修復案例通過，使用者資料保持一致。
 
-實作結果：加入 Tauri updater 與 Settings「立即檢查／安裝並重新啟動」介面，固定使用 HTTPS static manifest、內嵌 public key、`requireSignedVersion` 及 strictly-newer SemVer policy；updater minisign 與 Windows Authenticode 分離，因此 unsigned 開發 installer 仍會產生不可竄改且綁定版本的 `.sig` 與 `latest.json`。套用前會在 app-data 以可回復 replace 寫入 `update-state.json`，下次啟動辨識成功版本或保留舊版並提供安全重試。資料庫在任何 migration／manifest sync 前檢查最高 schema，舊版遇到較新資料會在零寫入下停止並顯示復原說明；settings 與 package manifest 也持續拒絕未知新 schema。更新服務離線只回報 `offline`，不阻擋使用已驗證的本機 runtime／model；下載支援 `.part` resume、size／SHA-256 驗證、有效 cache 離線重用，安裝則透過 staging／backup 防止損壞既有環境。`scripts/Test-UpdatePolicy.ps1` 已加入 release gate，並以單元測試覆蓋 downgrade、future-schema 零寫入、更新狀態回復、cache offline reuse、安裝中斷復原、簽章竄改及 signed-version mismatch。流程與開發 key／正式 release key 邊界記錄於 `docs/release/updates-and-recovery.md`；真正由公開 endpoint 進行的雙版本更新及正式 CA 簽章實機紀錄延至 9.8 release candidate。
+實作結果：加入 Tauri updater 與 Settings「立即檢查／安裝並重新啟動」介面，固定使用 HTTPS static manifest、內嵌 public key、`requireSignedVersion` 及 strictly-newer SemVer policy；updater minisign 與 Windows Authenticode 分離，因此 unsigned installer 仍會產生不可竄改且綁定版本的 `.sig` 與 `latest.json`。套用前會在 app-data 以可回復 replace 寫入 `update-state.json`，下次啟動辨識成功版本或保留舊版並提供安全重試。資料庫在任何 migration／manifest sync 前檢查最高 schema，舊版遇到較新資料會在零寫入下停止並顯示復原說明；settings 與 package manifest 也持續拒絕未知新 schema。更新服務離線只回報 `offline`，不阻擋使用已驗證的本機 runtime／model；下載支援 `.part` resume、size／SHA-256 驗證、有效 cache 離線重用，安裝則透過 staging／backup 防止損壞既有環境。`scripts/Test-UpdatePolicy.ps1` 已加入 release gate，並以單元測試覆蓋 downgrade、future-schema 零寫入、更新狀態回復、cache offline reuse、安裝中斷復原、簽章竄改及 signed-version mismatch。流程與開發 key／正式 release key 邊界記錄於 `docs/release/updates-and-recovery.md`；真正由公開 endpoint 進行的雙版本更新延至 9.8 release candidate，正式 CA 簽章為可選改善。
 
 #### 9.7 GPU 與驅動支援矩陣
 
@@ -944,8 +944,10 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 
 #### 9.8 Release Pipeline 與候選版驗收
 
+目前已加入 `scripts/Build-ReleaseCandidate.ps1` 作為單一入口：先跑完整 GPU-free release gate，再由乾淨、已提交的 revision 建立 signed 或明確指定 `-AllowUnsignedPublicRelease` 的公開候選版；`-AllowUnsignedLocalSmoke` 仍只建立不可發布的本機測試版。封裝包含版本對應的 release notes、known issues、GPU 支援矩陣、RC 驗收手冊、授權 notices、checksums 與 provenance，artifact policy 會核對清單完整性、雜湊、發布模式、可用時的 Authenticode signer 身分，以及 updater 公鑰／版本的密碼學簽章。unsigned-public 必須揭露沒有 Windows 驗證的 Publisher，不能宣稱可避開 SmartScreen；公網雙版本更新及全新 Windows 環境核心流程仍需人工驗收。正式 CA 簽章可留待後續改善。操作清單見 `docs/release/release-candidate-runbook.md`。
+
 - 建立從乾淨 source revision 產生前端、Rust、worker resources、installer、checksums、notices 與 release notes 的版本化流程。
-- 發布流程執行測試、lint、type-check、Clippy、依賴／授權檢查、artifact smoke test 與簽章驗證，任何必要步驟失敗都停止發布。
+- 發布流程執行測試、lint、type-check、Clippy、依賴／授權檢查、artifact smoke test 與 updater 簽章驗證；signed 模式另驗 Authenticode，任何必要步驟失敗都停止發布。
 - 建立 release notes、已知問題、支援矩陣、升級／修復說明與 rollback 操作手冊。
 - 使用 release candidate 在全新 Windows 帳號或機器完成安裝、首次設定、生成、validation、預覽、匯入、更新及診斷匯出的最終實機驗收。
 
@@ -1029,6 +1031,7 @@ Repository 公開策略：Stage 9.3 與 9.4 完成前維持 GitHub Private。隱
 - MaiMod 品質建議。
 - 輕量 beatmap 視覺預覽。
 - 擴充生成頁的譜面設定：每個難度可調 HP、OD、基本滑條速度與滑條點倍率；歌曲層級可編輯譜師、原文標題／歌手、來源與公開標籤，並另行評估堆疊寬容度、倒數、寬螢幕及其他 osu! metadata 選項。
+- 多模型擴充：讓使用者分別下載、驗證、修復、移除並在生成時選擇經 Beatforge 驗收的 Mapperatorinator 模型（例如 V31、V30），V32 維持預設。每個模型需獨立鎖定來源 revision、檔案與 checksum，確認對應的推論設定、精度、功能與輸出格式；job／provenance 必須記錄實際模型，重試時不得無提示切換。新增版本前須完成模型載入、單／多難度生成、validation、osu! 匯入與 GPU 實測；任意使用者提供的 checkpoint 另行評估，不與官方模型清單混為一談。
 - LoRA 與自訂 checkpoint 管理。
 - AMD／Linux 支援。
 - 可選的遠端 GPU worker，但仍沿用相同 job protocol。

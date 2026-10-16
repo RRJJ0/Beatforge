@@ -9,10 +9,12 @@ alone are not trusted: the downloaded installer must pass the embedded updater
 public-key signature before Tauri launches it. The private updater key is never
 committed.
 
-Updater signing is separate from Windows Authenticode. Stage 9.6 can use an
-ignored development updater key while the installer remains unsigned. The
-trusted release key, Authenticode certificate and public Publisher/SmartScreen
-acceptance remain Stage 9.8 work.
+Updater signing is separate from Windows Authenticode. Local smoke builds can
+use an ignored development updater key. Public builds, including a disclosed
+unsigned Windows installer, require an explicitly configured and securely
+retained updater private key matching the embedded public key. A CA-issued
+Windows Authenticode certificate is optional for the unsigned-public path;
+Windows will not display a verified Publisher for that path.
 
 Generate a replacement development key only before any public updater release:
 
@@ -83,4 +85,5 @@ For lifecycle testing, publish two non-public test versions to an isolated HTTPS
 endpoint or draft GitHub release. Verify normal update, an interrupted download,
 a modified installer/signature rejection, offline startup, future-schema
 rejection without writes, and repair of a damaged runtime/model. Repeat the
-signed public release path during Stage 9.8.
+public release path during Stage 9.8, recording whether Windows Authenticode
+was signed or explicitly unsigned.
