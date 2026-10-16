@@ -42,12 +42,14 @@
 | 匯出診斷並檢查沒有歌曲／私密資料 | 待驗 |
 | 重新安裝後設定、模型、任務與輸出保留 | 待驗 |
 | 解除安裝後使用者資料保留、程式移除 | 待驗 |
-| 從舊版經真實 HTTPS 端點更新至新版 updater-signed artifact | 待驗 |
+| 從舊版經真實 HTTPS 端點更新至新版 updater-signed artifact | 使用者於 2026-10-17 回報通過：`0.0.9` → `0.1.0`，使用隔離的 `https://localhost:48765/latest.json`。本機測試包：`artifacts/update-acceptance/localhost-20261016`（Git 忽略）；新版 installer SHA-256：`561f406708bc1ce383dc353f3c9d54d6e4f5769bb11eb48bb7b5b0b6959cfd7d`。Windows build、測試帳號細節與畫面／日誌尚未附上；正式 GitHub 端點需發布時另驗。 |
 | 更新／下載中斷與離線復原 | 待驗 |
 | 降版與未來 schema 被拒絕且不寫入資料 | 待驗 |
 
 更新驗收要使用兩個不同 SemVer build 與實際內嵌公鑰；只改 `latest.json`
 不算更新測試。保留舊版 installer、兩版 manifest 與 app-data 備份。
+可依照[隔離 HTTPS updater 驗收流程](update-acceptance.zh-TW.md)準備兩版本測試，
+不必變更正式端點。
 
 ## 回退與修復
 
