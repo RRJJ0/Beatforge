@@ -36,19 +36,25 @@ Record OS build, account/VM, GPU/driver, source commit, artifact checksum,
 date, tester, actual results and evidence locations. Run the lifecycle script
 in a disposable account/VM, never an account containing real Beatforge data.
 
+On 2026-10-17, the user reported that all local acceptance checks below passed.
+This is a user report, not independently collected evidence: the Windows build,
+test-account details, exact artifact/checksum for those checks, and screenshots
+or logs were not supplied. The production GitHub update endpoint cannot be
+marked as tested before publication.
+
 | Check | Result / evidence |
 | --- | --- |
-| Install; record actual Publisher/SmartScreen behavior for signed or unsigned mode | Pending |
-| First launch and runtime/model setup | Pending |
-| Generate at least one test beatmap | Pending |
-| Validation result and warnings are understandable | Pending |
-| Preview and osu! import; inspect editor audio/timing | Pending |
-| Export diagnostics and inspect for song/private data | Pending |
-| Reinstall preserves settings, models, jobs and outputs | Pending |
-| Uninstall preserves user data and removes program | Pending |
+| Install; record actual Publisher/SmartScreen behavior for signed or unsigned mode | User-reported pass on 2026-10-17; exact prompt/evidence not attached. |
+| First launch and runtime/model setup | User-reported pass on 2026-10-17; evidence not attached. |
+| Generate at least one test beatmap | User-reported pass on 2026-10-17; evidence not attached. |
+| Validation result and warnings are understandable | User-reported pass on 2026-10-17; evidence not attached. |
+| Preview and osu! import; inspect editor audio/timing | User-reported pass on 2026-10-17; evidence not attached. |
+| Export diagnostics and inspect for song/private data | User-reported pass on 2026-10-17; evidence not attached. |
+| Reinstall preserves settings, models, jobs and outputs | User-reported pass on 2026-10-17; evidence not attached. |
+| Uninstall preserves user data and removes program | User-reported pass on 2026-10-17; evidence not attached. |
 | Older version to newer updater-signed artifact from real HTTPS endpoint | User reported pass on 2026-10-17: `0.0.9` → `0.1.0` via isolated `https://localhost:48765/latest.json`. Local bundle: `artifacts/update-acceptance/localhost-20261016` (ignored); target installer SHA-256 `561f406708bc1ce383dc353f3c9d54d6e4f5769bb11eb48bb7b5b0b6959cfd7d`. Windows build, test-account details, and screenshots/logs not yet attached. Production GitHub endpoint remains untested until publication. |
-| Interrupted update/download and offline recovery | Pending |
-| Downgrade/future-schema rejection without data writes | Pending |
+| Interrupted update/download and offline recovery | User-reported pass on 2026-10-17; evidence not attached. |
+| Downgrade/future-schema rejection without data writes | User-reported pass on 2026-10-17; evidence not attached. |
 
 For updater acceptance, use two distinct SemVer builds and the actual embedded
 public key; changing `latest.json` alone is not an update test. Keep the older
