@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Local-first AI beatmap generation desktop application"
 authors = ["RRJJ0"]
 license = "MIT"
-repository = "https://github.com/RRJJ0/OsuBeatforge"
+repository = "https://github.com/RRJJ0/Beatforge"
 edition = "2024"
 rust-version = "1.95"
 

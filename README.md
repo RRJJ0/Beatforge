@@ -10,7 +10,7 @@ an automatic uploader, or a guarantee of a playable or rankable map.
 ## Get started
 
 1. When a release is available, download the Windows x64 installer and its
-   `SHA256SUMS.txt` from this repository's [Releases](https://github.com/RRJJ0/OsuBeatforge/releases).
+   `SHA256SUMS.txt` from this repository's [Releases](https://github.com/RRJJ0/Beatforge/releases).
    Check the [system requirements](docs/user/requirements.md) and [known
    issues](docs/release/known-issues.md) first.
 2. Install and open Beatforge. The first setup downloads the pinned AI runtime

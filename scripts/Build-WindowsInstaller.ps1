@@ -176,7 +176,7 @@ try {
 
     $signatureText = (Get-Content -LiteralPath $updaterSignature.FullName -Raw).Trim()
     if ([string]::IsNullOrWhiteSpace($signatureText)) { throw 'Updater signature is empty' }
-    $releaseUrl = "https://github.com/RRJJ0/OsuBeatforge/releases/download/v$($baseConfig.version)/$($installer.Name)"
+    $releaseUrl = "https://github.com/RRJJ0/Beatforge/releases/download/v$($baseConfig.version)/$($installer.Name)"
     $updateManifest = [ordered]@{
         version = [string]$baseConfig.version
         notes = "Beatforge $($baseConfig.version)"

@@ -37,7 +37,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "publisher": "RRJJ0",
-    "homepage": "https://github.com/RRJJ0/OsuBeatforge",
+    "homepage": "https://github.com/RRJJ0/Beatforge",
     "copyright": "Copyright © 2026 RRJJ0",
     "license": "MIT",
     "licenseFile": "../../LICENSE",
@@ -67,7 +67,7 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDMjEyNTAyN0MzMzFGOTAKUldTUUh6TjhBaVVoVFBhUzNtdWdITHM5L0doRTV5ZzhZUndqYm5kbUZjUEd1M0JsMW1CaVR5N0MK",
       "requireSignedVersion": true,
       "endpoints": [
-        "https://github.com/RRJJ0/OsuBeatforge/releases/latest/download/latest.json"
+        "https://github.com/RRJJ0/Beatforge/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

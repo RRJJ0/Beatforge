@@ -8,7 +8,7 @@ osu! 匯入；不取代 osu! 編輯器、不會自動上傳，也不保證譜面
 
 ## 開始使用
 
-1. 發布版本上線後，從本專案的 [Releases](https://github.com/RRJJ0/OsuBeatforge/releases)
+1. 發布版本上線後，從本專案的 [Releases](https://github.com/RRJJ0/Beatforge/releases)
    下載 Windows x64 安裝程式與 `SHA256SUMS.txt`。先確認[系統需求](docs/user/requirements.zh-TW.md)
    與[已知問題](docs/release/known-issues.zh-TW.md)。
 2. 安裝並開啟 Beatforge。首次設定會下載固定版本的 AI runtime 與模型，需預留網路、
