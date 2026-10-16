@@ -10,7 +10,16 @@ Run from the repository root:
 
 The script scans every reachable Git revision for personal Windows user paths, the known development username, common AWS/GitHub/OpenAI token shapes, and private-key headers. It also inventories historical paths with song/audio, beatmap/archive, media, database, model-weight, and checkpoint extensions.
 
-The only binary/media allowlist is the Tauri application icon PNG set. The only `.osu` allowlist is the small project-authored text validation fixtures under `app/src-tauri/tests/fixtures/validation`; they are independently size/content governed by the release fixture policy. A historical `C:\Users\You\.beatforge\models` UI placeholder in `ModelsView.vue` is allowed because `You` is literal example text. The developer username has a separate zero-tolerance rule, so this exception cannot conceal the actual local account name.
+The binary/media allowlist contains Tauri application icons and six manually
+reviewed, redacted UI screenshots under `docs/demoImage/`. Each screenshot is
+pinned to its Git blob ID; replacing it requires another explicit review and
+policy update. The only `.osu` allowlist is the small project-authored text
+validation fixtures under `app/src-tauri/tests/fixtures/validation`; they are
+independently size/content governed by the release fixture policy. A historical
+`C:\Users\You\.beatforge\models` UI placeholder in `ModelsView.vue` is allowed
+because `You` is literal example text. The developer username has a separate
+zero-tolerance rule, so this exception cannot conceal the actual local account
+name.
 
 The privacy scan is part of `scripts/Test-Release.ps1`. Any unallowlisted historical object or sensitive-pattern path fails the release gate without printing matched secret text.
 

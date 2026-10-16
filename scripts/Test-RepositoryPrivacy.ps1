@@ -51,6 +51,16 @@ try {
         }
     }
 
+    # Only these manually reviewed, redacted documentation screenshots are public.
+    # Pin their Git blob IDs so replacing a screenshot requires another review.
+    $allowedScreenshots = @{
+        'docs/demoImage/generate.png' = '22799c6cfd713afc7274fee2e539ffc7661d9342'
+        'docs/demoImage/history.png' = '66dc851bd865ed4850cbd238fbd2e940480cd684'
+        'docs/demoImage/jobs.png' = 'f8cea9d381d8a753699b29a96c8c292bd0e74f05'
+        'docs/demoImage/model.png' = 'c60d85b9210c5444356e201057b190cb07c72fbc'
+        'docs/demoImage/setting-1.png' = '74fad5cab422db4782ff50b94f3b79af045a40bd'
+        'docs/demoImage/setting-2.png' = 'f77fce4c75e47db02a8b50b8d8937b19be4c7242'
+    }
     $mediaPattern = '\.(mp3|wav|ogg|m4a|flac|osu|osz|png|jpe?g|gif|mp4|avi|flv|db|sqlite|safetensors|pt|pth|ckpt)$'
     $objects = @(git.exe rev-list --objects --all)
     foreach ($line in $objects) {
@@ -58,9 +68,11 @@ try {
         if ($space -lt 0) { continue }
         $path = $line.Substring($space + 1).Replace('\', '/')
         if ($path -notmatch $mediaPattern) { continue }
+        $objectId = $line.Substring(0, $space)
         $allowedIcon = $path -match '^app/src-tauri/icons/[^/]+\.png$'
         $allowedFixture = $path -match '^app/src-tauri/tests/fixtures/validation/(valid|invalid|warnings)/[^/]+\.osu$'
-        if (-not $allowedIcon -and -not $allowedFixture) {
+        $allowedScreenshot = $allowedScreenshots.ContainsKey($path) -and $allowedScreenshots[$path] -eq $objectId
+        if (-not $allowedIcon -and -not $allowedFixture -and -not $allowedScreenshot) {
             $violations.Add("Prohibited media/data history object: $path")
         }
     }
@@ -69,7 +81,7 @@ try {
         $summary = $violations | Sort-Object -Unique
         throw "Repository privacy scan found $($summary.Count) issue(s):`n$($summary -join "`n")"
     }
-    Write-Host "Repository privacy scan passed: $($revisions.Count) revisions; no credential, personal-path, song, generated beatmap, model, or database history objects." -ForegroundColor Green
+    Write-Host "Repository privacy scan passed: $($revisions.Count) revisions; only reviewed documentation screenshots are allowlisted media." -ForegroundColor Green
 }
 finally {
     Pop-Location
