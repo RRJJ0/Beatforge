@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "description": "Recipes used by archive tests to create hostile ZIP files inside an isolated temporary directory.",
+  "cases": [
+    {
+      "id": "path-traversal",
+      "entries": [{ "path": "../outside.osu", "content": "fixture" }],
+      "expectedCode": "ARCHIVE_PATH_TRAVERSAL"
+    },
+    {
+      "id": "absolute-windows-path",
+      "entries": [{ "path": "C:/outside.osu", "content": "fixture" }],
+      "expectedCode": "ARCHIVE_ABSOLUTE_PATH"
+    },
+    {
+      "id": "absolute-posix-path",
+      "entries": [{ "path": "/outside.osu", "content": "fixture" }],
+      "expectedCode": "ARCHIVE_ABSOLUTE_PATH"
+    },
+    {
+      "id": "case-collision",
+      "entries": [
+        { "path": "Map.osu", "content": "first" },
+        { "path": "map.osu", "content": "second" }
+      ],
+      "expectedCode": "ARCHIVE_CASE_COLLISION"
+    },
+    {
+      "id": "entry-count-limit",
+      "generatedEntryCount": 257,
+      "expectedCode": "ARCHIVE_LIMIT_EXCEEDED"
+    },
+    {
+      "id": "link-entry",
+      "unixMode": 41471,
+      "entries": [{ "path": "linked.osu", "content": "target.osu" }],
+      "expectedCode": "ARCHIVE_LINK_ENTRY"
+    }
+  ]
+}

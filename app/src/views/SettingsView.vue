@@ -1,0 +1,1238 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NCheckbox,
+  NCheckboxGroup,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NInputNumber,
+  NModal,
+  NRadioButton,
+  NRadioGroup,
+  NSelect,
+  NSwitch,
+  NTag,
+  useMessage,
+} from 'naive-ui'
+import {
+  CheckmarkCircleOutline,
+  FolderOpenOutline,
+  HardwareChipOutline,
+  RefreshOutline,
+  SaveOutline,
+  TrashOutline,
+} from '@vicons/ionicons5'
+import {
+  isDesktopRuntime,
+  checkForAppUpdate,
+  cleanupStorage,
+  exportDiagnosticPackage,
+  exportDesktopSettings,
+  getStorageUsage,
+  loadDesktopSettings,
+  installAppUpdate,
+  previewDesktopSettingsImport,
+  previewDiagnosticExport,
+  previewStorageCleanup,
+  resetDesktopSettings,
+  saveDesktopSettings,
+  selectDirectory,
+  selectDiagnosticExportFile,
+  selectSettingsExportFile,
+  selectSettingsImportFile,
+} from '@/services/desktop'
+import { useDesktopStore } from '@/stores/desktop'
+import {
+  desktopNotificationPermission,
+  requestDesktopNotificationPermission,
+  sendTestDesktopNotification,
+  type DesktopNotificationPermission,
+} from '@/services/notifications'
+import type {
+  AppLocale,
+  AppSettings,
+  AppUpdateCheck,
+  DiagnosticPreview,
+  SettingsImportPreview,
+  StorageCategory,
+  StorageCleanupPreview,
+  StorageCleanupResult,
+  StorageUsageReport,
+} from '@/types'
+import { useI18n } from '@/i18n'
+
+const message = useMessage()
+const desktopStore = useDesktopStore()
+const { locale, setLocale, t } = useI18n()
+const savedSettings = JSON.parse(localStorage.getItem('beatforge:settings') ?? '{}')
+const outputPath = ref(savedSettings.outputPath ?? '')
+const tempPath = ref(savedSettings.tempPath ?? '')
+const osuPath = ref(savedSettings.osuPath ?? '')
+const device = ref(savedSettings.device ?? 'cuda')
+const precision = ref(
+  savedSettings.precision === 'fp16' ? 'bf16' : (savedSettings.precision ?? 'bf16'),
+)
+const workers = ref(savedSettings.workers ?? 2)
+const autoImport = ref(savedSettings.autoImport ?? true)
+const keepIntermediate = ref(savedSettings.keepIntermediate ?? false)
+const repairGeneratedOutput = ref(savedSettings.repairGeneratedOutput ?? true)
+const updates = ref(savedSettings.checkUpdates ?? true)
+const updateCheck = ref<AppUpdateCheck | null>(null)
+const updateLoading = ref(false)
+const updateInstalling = ref(false)
+const desktopNotifications = ref(savedSettings.desktopNotifications ?? true)
+const selectedLocale = ref<AppLocale>(savedSettings.locale === 'zh-TW' ? 'zh-TW' : locale.value)
+const notificationPermission = ref<DesktopNotificationPermission>('unavailable')
+const checking = ref(false)
+const saving = ref(false)
+const transferring = ref(false)
+const resetField = ref<keyof AppSettings>('outputPath')
+const importPreview = ref<SettingsImportPreview | null>(null)
+const storageUsage = ref<StorageUsageReport | null>(null)
+const storageLoading = ref(false)
+const cleanupSelection = ref<StorageCategory[]>([])
+const cleanupPlanCategories = ref<StorageCategory[]>([])
+const cleanupPreview = ref<StorageCleanupPreview | null>(null)
+const cleanupResult = ref<StorageCleanupResult | null>(null)
+const allowProtectedCleanup = ref(false)
+const diagnosticPreview = ref<DiagnosticPreview | null>(null)
+const diagnosticLoading = ref(false)
+const diagnosticConsent = ref(false)
+const gpu = computed(() => desktopStore.system?.gpu)
+
+const storageLabels: Record<StorageCategory, string> = {
+  runtime: 'Runtime',
+  models: 'Models',
+  cache: 'Download cache',
+  logs: 'Old logs',
+  jobsRaw: 'Job raw artifacts',
+  jobsWorking: 'Job working files',
+  jobsValidated: 'Validated results',
+}
+
+function applySettings(settings: AppSettings) {
+  outputPath.value = settings.outputPath
+  tempPath.value = settings.tempPath
+  osuPath.value = settings.osuPath
+  device.value = settings.device
+  precision.value = settings.precision === 'fp16' ? 'bf16' : settings.precision
+  workers.value = settings.workers
+  autoImport.value = settings.autoImport
+  keepIntermediate.value = settings.keepIntermediate
+  repairGeneratedOutput.value = settings.repairGeneratedOutput
+  updates.value = settings.checkUpdates
+  desktopNotifications.value = settings.desktopNotifications
+  selectedLocale.value = settings.locale
+  setLocale(settings.locale)
+}
+
+function currentSettings(): AppSettings {
+  return {
+    outputPath: outputPath.value,
+    tempPath: tempPath.value,
+    osuPath: osuPath.value,
+    device: device.value,
+    precision: precision.value,
+    workers: workers.value,
+    autoImport: autoImport.value,
+    keepIntermediate: keepIntermediate.value,
+    repairGeneratedOutput: repairGeneratedOutput.value,
+    checkUpdates: updates.value,
+    desktopNotifications: desktopNotifications.value,
+    locale: selectedLocale.value,
+  }
+}
+
+onMounted(async () => {
+  if (!isDesktopRuntime()) return
+  try {
+    applySettings(await loadDesktopSettings())
+  } catch (reason) {
+    message.error(`Could not load desktop settings: ${String(reason)}`)
+  }
+  if (updates.value) await checkUpdates(true)
+  await refreshStorage(true)
+  notificationPermission.value = await desktopNotificationPermission()
+})
+
+async function checkUpdates(silent = false) {
+  if (!isDesktopRuntime()) return
+  updateLoading.value = true
+  try {
+    updateCheck.value = await checkForAppUpdate()
+    if (!silent && updateCheck.value.status === 'up_to_date') {
+      message.success(t('settings.updateCurrent'))
+    }
+  } catch (reason) {
+    if (!silent) message.error(`${t('settings.updateCheckFailed')}: ${String(reason)}`)
+  } finally {
+    updateLoading.value = false
+  }
+}
+
+async function applyUpdate() {
+  updateInstalling.value = true
+  try {
+    await installAppUpdate()
+  } catch (reason) {
+    message.error(`${t('settings.updateInstallFailed')}: ${String(reason)}`)
+    updateInstalling.value = false
+  }
+}
+
+async function runDiagnostics() {
+  checking.value = true
+  await desktopStore.initialize()
+  checking.value = false
+  if (desktopStore.error) message.error(desktopStore.error)
+  else message.success('System and installation scan completed.')
+}
+
+async function browse(target: 'output' | 'temp' | 'osu') {
+  if (!isDesktopRuntime()) {
+    message.info('Folder selection is available in the desktop app.')
+    return
+  }
+  const current =
+    target === 'output' ? outputPath.value : target === 'temp' ? tempPath.value : osuPath.value
+  const selected = await selectDirectory(current || undefined)
+  if (!selected) return
+  if (target === 'output') outputPath.value = selected
+  else if (target === 'temp') tempPath.value = selected
+  else osuPath.value = selected
+}
+
+async function saveSettings() {
+  const settings = currentSettings()
+  saving.value = true
+  try {
+    if (isDesktopRuntime()) await saveDesktopSettings(settings)
+    else localStorage.setItem('beatforge:settings', JSON.stringify(settings))
+    setLocale(settings.locale)
+    message.success('Settings saved locally.')
+  } catch (reason) {
+    message.error(`Could not save settings: ${String(reason)}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+function changeLocale(value: AppLocale) {
+  selectedLocale.value = value
+}
+
+async function exportSettingsFile() {
+  if (!isDesktopRuntime()) return message.info('Settings export is available in the desktop app.')
+  const path = await selectSettingsExportFile()
+  if (!path) return
+  transferring.value = true
+  try {
+    const exported = await exportDesktopSettings(path, currentSettings())
+    message.success(`Settings exported to ${exported}`)
+  } catch (reason) {
+    message.error(`Could not export settings: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+async function chooseSettingsImport() {
+  if (!isDesktopRuntime()) return message.info('Settings import is available in the desktop app.')
+  const path = await selectSettingsImportFile()
+  if (!path) return
+  transferring.value = true
+  try {
+    importPreview.value = await previewDesktopSettingsImport(path)
+  } catch (reason) {
+    message.error(`Could not preview settings import: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+async function applySettingsImport() {
+  if (!importPreview.value) return
+  transferring.value = true
+  try {
+    await saveDesktopSettings(importPreview.value.resultingSettings)
+    applySettings(importPreview.value.resultingSettings)
+    importPreview.value = null
+    message.success('Imported settings applied.')
+  } catch (reason) {
+    message.error(`Could not apply imported settings: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+async function reviewDiagnosticExport() {
+  if (!isDesktopRuntime()) {
+    return message.info(t('settings.diagnosticsDesktopOnly'))
+  }
+  diagnosticLoading.value = true
+  try {
+    diagnosticPreview.value = await previewDiagnosticExport()
+    diagnosticConsent.value = false
+  } catch (reason) {
+    message.error(t('settings.diagnosticsPreviewFailed', { error: String(reason) }))
+  } finally {
+    diagnosticLoading.value = false
+  }
+}
+
+async function createDiagnosticExport() {
+  if (!diagnosticPreview.value || !diagnosticConsent.value) return
+  const path = await selectDiagnosticExportFile(diagnosticPreview.value.diagnosticId)
+  if (!path) return
+  diagnosticLoading.value = true
+  try {
+    const result = await exportDiagnosticPackage(path, diagnosticPreview.value.diagnosticId)
+    diagnosticPreview.value = null
+    diagnosticConsent.value = false
+    message.success(t('settings.diagnosticsExported', { id: result.diagnosticId }))
+  } catch (reason) {
+    message.error(t('settings.diagnosticsExportFailed', { error: String(reason) }))
+  } finally {
+    diagnosticLoading.value = false
+  }
+}
+
+async function restoreDefaults(all: boolean) {
+  if (!isDesktopRuntime()) return message.info('Settings reset is available in the desktop app.')
+  if (all && !window.confirm('Restore every setting to this machine’s defaults?')) return
+  transferring.value = true
+  try {
+    const settings = await resetDesktopSettings(all ? undefined : resetField.value)
+    applySettings(settings)
+    message.success(all ? 'All settings restored.' : `${resetField.value} restored.`)
+  } catch (reason) {
+    message.error(`Could not restore settings: ${String(reason)}`)
+  } finally {
+    transferring.value = false
+  }
+}
+
+function settingValue(value: unknown) {
+  if (value === undefined) return 'Not present'
+  if (value === '') return 'Empty'
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function importTagType(action: SettingsImportPreview['items'][number]['action']) {
+  if (action === 'apply') return 'success'
+  if (action === 'ignored') return 'warning'
+  if (action === 'reset') return 'info'
+  return 'default'
+}
+
+async function enableNotificationPermission() {
+  notificationPermission.value = await requestDesktopNotificationPermission()
+  if (notificationPermission.value === 'granted') {
+    message.success('Windows notification permission is enabled.')
+  } else {
+    message.warning('Windows notifications are unavailable; in-app job notices will still work.')
+  }
+}
+
+async function testNotification() {
+  if (await sendTestDesktopNotification()) {
+    message.success('Test notification sent.')
+  } else {
+    message.warning('Windows notification could not be sent; in-app job notices remain available.')
+  }
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unit = units[0]
+  for (let index = 1; value >= 1024 && index < units.length; index += 1) {
+    value /= 1024
+    unit = units[index]
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`
+}
+
+function formatModified(timestamp?: number | null) {
+  return timestamp ? new Date(timestamp).toLocaleString() : 'No files'
+}
+
+async function refreshStorage(resetSelection = false) {
+  if (!isDesktopRuntime()) return
+  storageLoading.value = true
+  try {
+    const usage = await getStorageUsage()
+    storageUsage.value = usage
+    if (resetSelection) {
+      cleanupSelection.value = usage.categories
+        .filter((item) => item.defaultSelected && item.eligibleBytes > 0)
+        .map((item) => item.category)
+    }
+  } catch (reason) {
+    message.error(`Could not scan storage: ${String(reason)}`)
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function reviewStorageCleanup() {
+  if (!cleanupSelection.value.length) return message.info('Select something to clean first.')
+  storageLoading.value = true
+  try {
+    cleanupPlanCategories.value = [...cleanupSelection.value]
+    cleanupPreview.value = await previewStorageCleanup(cleanupPlanCategories.value)
+    allowProtectedCleanup.value = false
+  } catch (reason) {
+    message.error(`Could not preview cleanup: ${String(reason)}`)
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function performStorageCleanup() {
+  if (!cleanupPreview.value) return
+  storageLoading.value = true
+  try {
+    const result = await cleanupStorage(cleanupPlanCategories.value, allowProtectedCleanup.value)
+    storageUsage.value = result.usage
+    cleanupResult.value = result
+    cleanupPreview.value = null
+    cleanupSelection.value = []
+    if (result.failures.length) {
+      message.warning(
+        `Released ${formatBytes(result.freedBytes)}; ${result.failures.length} item(s) could not be removed.`,
+      )
+    } else {
+      message.success(`Cleanup released ${formatBytes(result.freedBytes)}.`)
+    }
+  } catch (reason) {
+    message.error(`Could not clean storage: ${String(reason)}`)
+  } finally {
+    storageLoading.value = false
+  }
+}
+</script>
+
+<template>
+  <div class="settings-grid">
+    <section class="settings-main">
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">{{ t('settings.output') }}</h2>
+            <p class="section-copy">{{ t('settings.outputHelp') }}</p>
+          </div>
+        </div>
+        <NForm label-placement="top">
+          <NFormItem :label="t('settings.outputFolder')">
+            <div class="path-field">
+              <NInput v-model:value="outputPath" class="mono" /><NButton
+                secondary
+                @click="browse('output')"
+                ><template #icon><NIcon :component="FolderOpenOutline" /></template>{{ t('common.browse') }}</NButton
+              >
+            </div>
+          </NFormItem>
+          <NFormItem :label="t('settings.tempFolder')">
+            <div class="path-field">
+              <NInput v-model:value="tempPath" class="mono" /><NButton
+                secondary
+                @click="browse('temp')"
+                ><template #icon><NIcon :component="FolderOpenOutline" /></template>{{ t('common.browse') }}</NButton
+              >
+            </div>
+          </NFormItem>
+          <NFormItem :label="t('settings.osuFolder')">
+            <div class="path-field">
+              <NInput
+                v-model:value="osuPath"
+                class="mono"
+                :placeholder="t('settings.osuPlaceholder')"
+              /><NButton secondary @click="browse('osu')"
+                ><template #icon><NIcon :component="FolderOpenOutline" /></template>{{ t('common.browse') }}</NButton
+              >
+            </div>
+          </NFormItem>
+          <div v-if="desktopStore.osuInstallations.length" class="detected-paths">
+            <button
+              v-for="installation in desktopStore.osuInstallations"
+              :key="installation.path"
+              type="button"
+              :disabled="!installation.executable"
+              :title="
+                installation.executable ? 'Use this osu! installation' : 'No osu!.exe detected here'
+              "
+              @click="osuPath = installation.path"
+            >
+              <strong>osu! {{ installation.kind }}</strong
+              ><span>{{ installation.path }}</span>
+            </button>
+          </div>
+          <div class="setting-row">
+            <div>
+              <strong>{{ t('settings.autoImport') }}</strong
+              ><small>{{ t('settings.autoImportHelp') }}</small>
+            </div>
+            <NSwitch v-model:value="autoImport" :aria-label="t('settings.autoImport')" />
+          </div>
+          <div class="setting-row">
+            <div>
+              <strong>{{ t('settings.keep') }}</strong
+              ><small>{{ t('settings.keepHelp') }}</small>
+            </div>
+            <NSwitch v-model:value="keepIntermediate" :aria-label="t('settings.keep')" />
+          </div>
+        </NForm>
+      </NCard>
+
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">{{ t('settings.compute') }}</h2>
+            <p class="section-copy">{{ t('settings.computeHelp') }}</p>
+          </div>
+          <NTag :type="gpu?.available ? 'success' : 'warning'" round size="small">{{
+            gpu?.available ? t('settings.cudaAvailable') : t('settings.cudaUnavailable')
+          }}</NTag>
+        </div>
+        <NForm label-placement="top">
+          <NFormItem :label="t('settings.device')"
+            ><NRadioGroup v-model:value="device"
+              ><NRadioButton value="cuda">NVIDIA CUDA</NRadioButton
+              ><NRadioButton value="cpu">CPU</NRadioButton></NRadioGroup
+            ></NFormItem
+          >
+          <div class="two-column">
+            <NFormItem :label="t('settings.precision')"
+              ><NSelect
+                v-model:value="precision"
+                :options="[
+                  { label: 'BF16 · Recommended', value: 'bf16' },
+                  { label: 'FP32 · Compatible', value: 'fp32' },
+                ]"
+            /></NFormItem>
+            <NFormItem :label="t('settings.workers')"
+              ><NInputNumber v-model:value="workers" :min="1" :max="4"
+            /></NFormItem>
+          </div>
+          <NAlert type="info" :show-icon="false"
+            >BF16 is the native precision for Mapperatorinator V32. Unsupported GPUs fall back
+            safely to FP32.</NAlert
+          >
+          <div class="setting-row">
+            <div>
+              <strong>{{ t('settings.repair') }}</strong
+              ><small
+                >Resolve generated event times, discard time regressions, and repair invalid slider
+                values. Disable to preserve Mapperatorinator output unchanged.</small
+              >
+            </div>
+            <NSwitch v-model:value="repairGeneratedOutput" :aria-label="t('settings.repair')" />
+          </div>
+          <NAlert v-if="!repairGeneratedOutput" type="warning" :show-icon="false">
+            Raw output can fail validation or contain unplayable objects. Failed output can still be
+            imported manually from the job details.
+          </NAlert>
+        </NForm>
+      </NCard>
+
+      <NCard class="panel-card storage-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">{{ t('settings.storage') }}</h2>
+            <p class="section-copy">
+              Managed files use
+              <strong>{{ formatBytes(storageUsage?.totalBytes ?? 0) }}</strong> in total.
+            </p>
+          </div>
+          <NButton quaternary circle :aria-label="t('common.refresh')" :loading="storageLoading" @click="refreshStorage(false)">
+            <template #icon><NIcon :component="RefreshOutline" /></template>
+          </NButton>
+        </div>
+        <NAlert v-if="storageUsage?.activeJobs.length" type="warning" :show-icon="false">
+          {{ storageUsage.activeJobs.length }} active job(s) are protected and excluded from
+          cleanup.
+        </NAlert>
+        <NCheckboxGroup v-model:value="cleanupSelection" class="storage-list">
+          <div
+            v-for="item in storageUsage?.categories ?? []"
+            :key="item.category"
+            class="storage-item"
+          >
+            <NCheckbox
+              :value="item.category"
+              :disabled="!item.cleanable || item.eligibleBytes === 0"
+            >
+              <span class="storage-name">
+                {{ storageLabels[item.category] }}
+                <NTag v-if="item.protected" size="tiny" type="warning" round>{{ t('common.result') }}</NTag>
+              </span>
+            </NCheckbox>
+            <strong>{{ formatBytes(item.bytes) }}</strong>
+            <small>
+              {{ item.files }} files · updated {{ formatModified(item.latestModifiedMs) }}
+              <template v-if="item.cleanable">
+                · {{ formatBytes(item.eligibleBytes) }} eligible
+              </template>
+            </small>
+          </div>
+        </NCheckboxGroup>
+        <NAlert v-if="storageUsage?.warnings.length" type="warning" :show-icon="false">
+          {{ storageUsage.warnings.length }} linked, unsupported, or unreadable item(s) were left
+          untouched.
+        </NAlert>
+        <NAlert
+          v-if="cleanupResult"
+          :type="cleanupResult.failures.length ? 'warning' : 'success'"
+          :show-icon="false"
+        >
+          Last cleanup released {{ formatBytes(cleanupResult.freedBytes) }} and removed
+          {{ cleanupResult.removedFiles }} files.
+          <ul v-if="cleanupResult.failures.length" class="cleanup-failures">
+            <li v-for="failure in cleanupResult.failures" :key="failure.target">
+              {{ storageLabels[failure.category] }} · {{ failure.target }} — {{ failure.error }}
+            </li>
+          </ul>
+        </NAlert>
+        <div class="storage-actions">
+          <span>Runtime and models are removed only from the Models screen.</span>
+          <NButton
+            type="warning"
+            secondary
+            :disabled="cleanupSelection.length === 0"
+            :loading="storageLoading"
+            @click="reviewStorageCleanup"
+          >
+            <template #icon><NIcon :component="TrashOutline" /></template>
+            {{ t('settings.reviewCleanup') }}
+          </NButton>
+        </div>
+      </NCard>
+    </section>
+
+    <aside class="settings-side">
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">{{ t('settings.environment') }}</h2>
+            <p class="section-copy">{{ t('settings.environmentHelp') }}</p>
+          </div>
+        </div>
+        <div class="health-list">
+          <div>
+            <span><NIcon :component="CheckmarkCircleOutline" />Desktop core</span
+            ><strong>{{ desktopStore.desktop ? 'Connected' : 'Browser mode' }}</strong>
+          </div>
+          <div>
+            <span><NIcon :component="CheckmarkCircleOutline" />Operating system</span
+            ><strong>{{
+              desktopStore.system
+                ? `${desktopStore.system.osName} ${desktopStore.system.osVersion}`
+                : 'Checking…'
+            }}</strong>
+          </div>
+          <div>
+            <span><NIcon :component="CheckmarkCircleOutline" />Memory</span
+            ><strong>{{
+              desktopStore.system
+                ? `${Math.round(desktopStore.system.totalMemoryMb / 1024)} GB`
+                : 'Checking…'
+            }}</strong>
+          </div>
+          <div>
+            <span><NIcon :component="HardwareChipOutline" />GPU</span
+            ><strong>{{ gpu?.name ?? 'Checking…' }}</strong>
+          </div>
+          <div>
+            <span><NIcon :component="HardwareChipOutline" />Storage free</span
+            ><strong>{{
+              desktopStore.system ? `${desktopStore.system.availableDiskGb} GB` : 'Checking…'
+            }}</strong>
+          </div>
+        </div>
+        <NButton block secondary :loading="checking" @click="runDiagnostics"
+          ><template #icon><NIcon :component="RefreshOutline" /></template>Run diagnostics</NButton
+        >
+      </NCard>
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">{{ t('settings.diagnostics') }}</h2>
+            <p class="section-copy">{{ t('settings.diagnosticsHelp') }}</p>
+          </div>
+          <NTag round size="small">Schema v1</NTag>
+        </div>
+        <NAlert type="info" :show-icon="false">
+          {{ t('settings.diagnosticsPrivacy') }}
+        </NAlert>
+        <NButton
+          block
+          secondary
+          :loading="diagnosticLoading"
+          @click="reviewDiagnosticExport"
+        >
+          {{ t('settings.reviewDiagnostics') }}
+        </NButton>
+      </NCard>
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">{{ t('settings.application') }}</h2>
+            <p class="section-copy">{{ t('settings.applicationHelp') }}</p>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <strong>{{ t('settings.language') }}</strong><small>{{ t('settings.languageHelp') }}</small>
+          </div>
+          <NSelect
+            class="language-select"
+            :value="selectedLocale"
+            :options="[
+              { label: t('settings.english'), value: 'en' },
+              { label: t('settings.chinese'), value: 'zh-TW' },
+            ]"
+            :aria-label="t('settings.language')"
+            @update:value="changeLocale"
+          />
+        </div>
+        <div class="setting-row">
+          <div>
+            <strong>{{ t('settings.updates') }}</strong><small>{{ t('settings.updatesHelp') }}</small>
+          </div>
+          <div class="setting-actions">
+            <NSwitch v-model:value="updates" :aria-label="t('settings.updates')" />
+            <NButton size="small" secondary :loading="updateLoading" @click="checkUpdates(false)">
+              {{ t('settings.checkNow') }}
+            </NButton>
+          </div>
+        </div>
+        <NAlert
+          v-if="updateCheck"
+          :type="updateCheck.status === 'available' ? 'info' : updateCheck.status === 'offline' ? 'warning' : 'success'"
+          :show-icon="false"
+        >
+          <div class="update-result">
+            <span v-if="updateCheck.status === 'available'">
+              {{ t('settings.updateAvailable') }} {{ updateCheck.availableVersion }}
+            </span>
+            <span v-else-if="updateCheck.status === 'offline'">
+              {{ updateCheck.message || t('settings.updateOffline') }}
+            </span>
+            <span v-else>{{ t('settings.updateCurrent') }} {{ updateCheck.currentVersion }}</span>
+            <NButton
+              v-if="updateCheck.status === 'available'"
+              size="small"
+              type="primary"
+              :loading="updateInstalling"
+              @click="applyUpdate"
+            >
+              {{ t('settings.installUpdate') }}
+            </NButton>
+          </div>
+        </NAlert>
+        <div class="setting-row">
+          <div>
+            <strong>{{ t('settings.notifications') }}</strong
+            ><small>{{ t('settings.notificationsHelp') }}</small>
+          </div>
+          <NSwitch v-model:value="desktopNotifications" :aria-label="t('settings.notifications')" />
+        </div>
+        <div v-if="desktopNotifications" class="notification-permission">
+          <span>
+            Windows permission
+            <NTag
+              size="small"
+              round
+              :type="notificationPermission === 'granted' ? 'success' : 'warning'"
+            >
+              {{ notificationPermission }}
+            </NTag>
+          </span>
+          <NButton
+            v-if="notificationPermission !== 'granted'"
+            size="small"
+            secondary
+            @click="enableNotificationPermission"
+          >
+            Enable permission
+          </NButton>
+          <NButton v-else size="small" secondary @click="testNotification">Send test</NButton>
+        </div>
+        <div class="app-version"><span>Beatforge Desktop</span><strong>0.1.0-alpha</strong></div>
+      </NCard>
+      <NCard class="panel-card" :bordered="false">
+        <div class="card-heading">
+          <div>
+            <h2 class="section-title">{{ t('settings.backup') }}</h2>
+            <p class="section-copy">{{ t('settings.backupHelp') }}</p>
+          </div>
+          <NTag round size="small">Schema v3</NTag>
+        </div>
+        <div class="transfer-actions">
+          <NButton secondary :loading="transferring" @click="exportSettingsFile">
+            {{ t('settings.export') }}
+          </NButton>
+          <NButton secondary :loading="transferring" @click="chooseSettingsImport">
+            {{ t('settings.import') }}
+          </NButton>
+        </div>
+        <div class="reset-control">
+          <NSelect
+            v-model:value="resetField"
+            :options="[
+              { label: 'Output path', value: 'outputPath' },
+              { label: 'Temporary path', value: 'tempPath' },
+              { label: 'osu! path', value: 'osuPath' },
+              { label: 'Compute device', value: 'device' },
+              { label: 'Precision', value: 'precision' },
+              { label: 'Background workers', value: 'workers' },
+              { label: 'Automatic import', value: 'autoImport' },
+              { label: 'Keep intermediate files', value: 'keepIntermediate' },
+              { label: 'Generated output repair', value: 'repairGeneratedOutput' },
+              { label: 'Update checks', value: 'checkUpdates' },
+              { label: 'Background notifications', value: 'desktopNotifications' },
+              { label: 'Interface language', value: 'locale' },
+            ]"
+          />
+          <NButton :loading="transferring" @click="restoreDefaults(false)">{{ t('settings.resetSelected') }}</NButton>
+        </div>
+        <NButton
+          block
+          tertiary
+          type="warning"
+          :loading="transferring"
+          @click="restoreDefaults(true)"
+        >
+          {{ t('settings.resetAll') }}
+        </NButton>
+      </NCard>
+      <NButton type="primary" size="large" block :loading="saving" @click="saveSettings"
+        ><template #icon><NIcon :component="SaveOutline" /></template>{{ t('common.save') }}</NButton
+      >
+    </aside>
+  </div>
+
+  <NModal :show="Boolean(importPreview)" @update:show="(show) => !show && (importPreview = null)">
+    <NCard class="import-preview" :bordered="false" role="dialog" aria-modal="true">
+      <div class="card-heading">
+        <div>
+          <h2 class="section-title">{{ t('settings.reviewImport') }}</h2>
+          <p class="section-copy">
+            {{
+              importPreview?.schemaVersion === 0
+                ? 'Legacy settings'
+                : `Schema v${importPreview?.schemaVersion}`
+            }}
+            · <span class="mono">{{ importPreview?.sourcePath }}</span>
+          </p>
+        </div>
+      </div>
+      <NAlert type="info" :show-icon="false">
+        Machine-specific paths are applied only when they exist. Confirming changes settings only;
+        models, jobs, and songs are not imported.
+      </NAlert>
+      <div class="import-items">
+        <div v-for="item in importPreview?.items" :key="item.field" class="import-item">
+          <div>
+            <strong>{{ item.field }}</strong>
+            <small>{{ item.reason }}</small>
+          </div>
+          <div class="import-change">
+            <span class="mono">{{ settingValue(item.current) }}</span>
+            <span>→</span>
+            <span class="mono">{{ settingValue(item.result) }}</span>
+          </div>
+          <NTag size="small" round :type="importTagType(item.action)">{{ item.action }}</NTag>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <NButton @click="importPreview = null">{{ t('common.cancel') }}</NButton>
+        <NButton type="primary" :loading="transferring" @click="applySettingsImport">
+          Apply imported settings
+        </NButton>
+      </div>
+    </NCard>
+  </NModal>
+
+  <NModal :show="Boolean(cleanupPreview)" @update:show="(show) => !show && (cleanupPreview = null)">
+    <NCard class="cleanup-preview" :bordered="false" role="dialog" aria-modal="true">
+      <div class="card-heading">
+        <div>
+          <h2 class="section-title">{{ t('settings.reviewCleanup') }}</h2>
+          <p class="section-copy">
+            {{ cleanupPreview?.totalFiles ?? 0 }} files and
+            {{ cleanupPreview?.totalDirectories ?? 0 }} directories ·
+            {{ formatBytes(cleanupPreview?.totalBytes ?? 0) }}
+          </p>
+        </div>
+      </div>
+      <div class="cleanup-items">
+        <div v-for="item in cleanupPreview?.categories" :key="item.category">
+          <span>
+            <strong>{{ storageLabels[item.category] }}</strong>
+            <small>{{ item.targets }} managed target(s)</small>
+          </span>
+          <strong>{{ formatBytes(item.bytes) }}</strong>
+        </div>
+      </div>
+      <NAlert v-if="cleanupPreview?.activeJobs.length" type="warning" :show-icon="false">
+        Active job folders were excluded. Their files will not be touched.
+      </NAlert>
+      <NAlert v-if="cleanupPreview?.warnings.length" type="warning" :show-icon="false">
+        {{ cleanupPreview.warnings.join(' ') }}
+      </NAlert>
+      <NCheckbox v-if="cleanupPreview?.protectedSelected" v-model:checked="allowProtectedCleanup">
+        I understand that selected raw or validated results cannot be downloaded again
+        automatically.
+      </NCheckbox>
+      <div class="modal-actions">
+        <NButton @click="cleanupPreview = null">{{ t('common.cancel') }}</NButton>
+        <NButton
+          type="error"
+          :loading="storageLoading"
+          :disabled="cleanupPreview?.protectedSelected && !allowProtectedCleanup"
+          @click="performStorageCleanup"
+        >
+          {{ t('settings.clean') }}
+        </NButton>
+      </div>
+    </NCard>
+  </NModal>
+
+  <NModal
+    :show="Boolean(diagnosticPreview)"
+    @update:show="(show) => !show && (diagnosticPreview = null)"
+  >
+    <NCard class="diagnostic-preview" :bordered="false" role="dialog" aria-modal="true">
+      <div class="card-heading">
+        <div>
+          <h2 class="section-title">{{ t('settings.reviewDiagnostics') }}</h2>
+          <p class="section-copy">
+            {{ diagnosticPreview?.diagnosticId }} ·
+            {{ formatBytes(diagnosticPreview?.totalBytes ?? 0) }}
+          </p>
+        </div>
+        <NTag round size="small">Schema v{{ diagnosticPreview?.schemaVersion }}</NTag>
+      </div>
+      <NAlert type="warning" :show-icon="false">
+        {{ diagnosticPreview?.privacyNotice }}
+      </NAlert>
+      <div class="diagnostic-files">
+        <div v-for="file in diagnosticPreview?.files" :key="file.name">
+          <span>
+            <strong class="mono">{{ file.name }}</strong>
+            <small>{{ file.description }}</small>
+          </span>
+          <strong>{{ formatBytes(file.sizeBytes) }}</strong>
+        </div>
+      </div>
+      <h3 class="diagnostic-subtitle">{{ t('settings.diagnosticsExcluded') }}</h3>
+      <ul class="diagnostic-excluded">
+        <li v-for="item in diagnosticPreview?.excluded" :key="item">{{ item }}</li>
+      </ul>
+      <NCheckbox v-model:checked="diagnosticConsent">
+        {{ t('settings.diagnosticsConfirm') }}
+      </NCheckbox>
+      <div class="modal-actions">
+        <NButton @click="diagnosticPreview = null">{{ t('common.cancel') }}</NButton>
+        <NButton
+          type="primary"
+          :loading="diagnosticLoading"
+          :disabled="!diagnosticConsent"
+          @click="createDiagnosticExport"
+        >
+          {{ t('settings.exportDiagnostics') }}
+        </NButton>
+      </div>
+    </NCard>
+  </NModal>
+</template>
+
+<style scoped>
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.65fr);
+  gap: 20px;
+  align-items: start;
+}
+.settings-main,
+.settings-side {
+  display: grid;
+  gap: 20px;
+}
+.path-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 9px;
+  width: 100%;
+}
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.setting-row strong,
+.setting-row small {
+  display: block;
+}
+.setting-actions,
+.update-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-result {
+  justify-content: space-between;
+}
+.setting-row strong {
+  font-size: 12px;
+}
+.setting-row small {
+  margin-top: 3px;
+  color: #858da0;
+  font-size: 10px;
+}
+.two-column {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.health-list {
+  margin-bottom: 18px;
+}
+.health-list > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+  font-size: 10px;
+}
+.health-list > div:first-child {
+  border-top: 0;
+}
+.health-list span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #858da0;
+}
+.health-list span .n-icon {
+  color: #51c790;
+}
+.health-list strong {
+  font-weight: 650;
+}
+.app-version {
+  display: flex;
+  justify-content: space-between;
+  color: #858da0;
+  font-size: 10px;
+}
+.app-version strong {
+  color: inherit;
+}
+.notification-permission {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: #858da0;
+  font-size: 10px;
+}
+.language-select {
+  width: 150px;
+}
+.notification-permission > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.transfer-actions,
+.reset-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.reset-control {
+  margin: 14px 0 8px;
+}
+.import-preview {
+  width: min(820px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+.cleanup-preview {
+  width: min(660px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+.diagnostic-preview {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+.storage-list,
+.cleanup-items {
+  display: grid;
+  margin: 12px 0;
+}
+.storage-item {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto;
+  gap: 4px 16px;
+  align-items: center;
+  padding: 11px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.storage-item > small {
+  grid-column: 1 / -1;
+  color: #858da0;
+  font-size: 9px;
+}
+.storage-name {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+.storage-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-top: 14px;
+}
+.storage-actions > span {
+  color: #858da0;
+  font-size: 9px;
+}
+.cleanup-items > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.diagnostic-files {
+  display: grid;
+  margin: 14px 0;
+}
+.diagnostic-files > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.diagnostic-files span strong,
+.diagnostic-files span small {
+  display: block;
+}
+.diagnostic-files span small,
+.diagnostic-excluded {
+  margin-top: 3px;
+  color: #858da0;
+  font-size: 9px;
+}
+.diagnostic-subtitle {
+  margin: 12px 0 6px;
+  font-size: 11px;
+}
+.diagnostic-excluded {
+  margin-bottom: 14px;
+  padding-left: 18px;
+}
+.cleanup-items span strong,
+.cleanup-items span small {
+  display: block;
+}
+.cleanup-items span small {
+  margin-top: 3px;
+  color: #858da0;
+  font-size: 9px;
+}
+.cleanup-failures {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+.import-items {
+  display: grid;
+  margin-top: 14px;
+}
+.import-item {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(280px, 1.4fr) 90px;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.12);
+}
+.import-item strong,
+.import-item small {
+  display: block;
+}
+.import-item small {
+  margin-top: 3px;
+  color: #858da0;
+  font-size: 9px;
+}
+.import-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: #858da0;
+  font-size: 9px;
+}
+.import-change .mono {
+  overflow-wrap: anywhere;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.detected-paths {
+  display: grid;
+  gap: 6px;
+  margin: -4px 0 14px;
+}
+.detected-paths button {
+  padding: 9px 11px;
+  text-align: left;
+  border: 1px solid rgba(127, 127, 127, 0.14);
+  border-radius: 8px;
+  color: inherit;
+  background: rgba(127, 127, 127, 0.035);
+  cursor: pointer;
+}
+.detected-paths button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.detected-paths strong,
+.detected-paths span {
+  display: block;
+}
+.detected-paths strong {
+  font-size: 10px;
+}
+.detected-paths span {
+  margin-top: 2px;
+  color: #858da0;
+  font-size: 9px;
+}
+</style>

@@ -1,0 +1,77 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Beatforge",
+  "mainBinaryName": "Beatforge",
+  "version": "0.1.0",
+  "identifier": "com.beatforge.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Beatforge",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1080,
+        "minHeight": 700,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
+      "devCsp": "default-src 'self' http://localhost:5173; connect-src ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173 asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline' http://localhost:5173; script-src 'self' 'unsafe-eval' http://localhost:5173; font-src 'self' data:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "publisher": "RRJJ0",
+    "homepage": "https://github.com/RRJJ0/OsuBeatforge",
+    "copyright": "Copyright © 2026 RRJJ0",
+    "license": "MIT",
+    "licenseFile": "../../LICENSE",
+    "category": "Music",
+    "shortDescription": "Local-first AI-assisted osu! beatmap generation",
+    "longDescription": "Beatforge runs Mapperatorinator locally and produces osu! beatmap drafts for further editing in osu! Editor.",
+    "useLocalToolsDir": true,
+    "resources": {
+      "../../LICENSE": "legal/LICENSE",
+      "../../THIRD_PARTY_NOTICES.md": "legal/THIRD_PARTY_NOTICES.md",
+        "../../THIRD_PARTY_NOTICES.zh-TW.md": "legal/THIRD_PARTY_NOTICES.zh-TW.md",
+      "../../third_party/dependency-inventory.json": "legal/dependency-inventory.json"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDMjEyNTAyN0MzMzFGOTAKUldTUUh6TjhBaVVoVFBhUzNtdWdITHM5L0doRTV5ZzhZUndqYm5kbUZjUEd1M0JsMW1CaVR5N0MK",
+      "requireSignedVersion": true,
+      "endpoints": [
+        "https://github.com/RRJJ0/OsuBeatforge/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
