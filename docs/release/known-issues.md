@@ -13,8 +13,10 @@
 - An unsigned public build has no verified Windows Publisher. SmartScreen may
   warn and managed Windows policies may refuse it; GitHub hosting and the
   separate updater signature do not remove this limitation.
-- The two-version public updater path remains a release-candidate gate until
-  recorded in a clean environment.
+- The production GitHub updater endpoint and signed `latest.json` are public,
+  but evidence for a clean-environment `0.0.9` to `0.1.0` update through that
+  production endpoint has not been recorded. The isolated HTTPS updater path
+  passed user-reported acceptance before release.
 
 Report defects using the app's diagnostic export, which omits song contents.
 Before sharing, inspect the ZIP for personal information and attach only the

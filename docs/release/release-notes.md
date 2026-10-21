@@ -1,10 +1,12 @@
-# Beatforge 0.1.0 release candidate notes
+# Beatforge 0.1.0 release notes
 
 [繁體中文](release-notes.zh-TW.md) · [Home](../../README.md)
 
-Status: release candidate. Publication requires release-gate, updater-signature
-and clean-machine acceptance. The publisher must identify which Windows
-signing mode was used for the downloadable artifact.
+Status: released. Beatforge v0.1.0 was published on 2026-10-16 at 17:36 UTC
+from source commit `51ef87d06a6b556abf377973574412315447d174`. The release is
+the intentionally disclosed `unsigned-public` Windows build: the updater
+artifact is signed, while the downloadable Windows executable is not
+Authenticode-signed.
 
 Windows Authenticode unsigned: if the GitHub release uses the free unsigned
 distribution path, Windows will not show a verified Publisher and may warn or
@@ -33,5 +35,7 @@ Generated beatmaps require human review. Do not assume that validation or
 successful import makes a beatmap ready for ranked submission. Follow the
 [AI disclosure and osu! upload guidance](../user/sharing.md).
 
-See `KNOWN_ISSUES.md` and `RELEASE_CANDIDATE_RUNBOOK.md` before testing. The
-exact source revision, tool versions and hashes are in `build-provenance.json`.
+Before installing, read the [known issues](known-issues.md). The preserved
+[release-candidate runbook](release-candidate-runbook.md) documents the build
+and acceptance process. The exact source revision, tool versions and hashes
+are in the published `build-provenance.json`.

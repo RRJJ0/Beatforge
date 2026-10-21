@@ -1,9 +1,11 @@
-# Beatforge 0.1.0 候選版說明
+# Beatforge 0.1.0 版本說明
 
 [English](release-notes.md) · [首頁](../../README.zh-TW.md)
 
-狀態：release candidate。公開前仍需通過發布測試、updater 簽章驗證與乾淨
-Windows 環境驗收；發布者必須註明實際使用的 Windows 簽章模式。
+狀態：已正式發布。Beatforge v0.1.0 於 2026-10-17 01:36（UTC+8）由來源
+commit `51ef87d06a6b556abf377973574412315447d174` 發布。本版採明確揭露的
+Windows `unsigned-public` 模式：updater artifact 已簽章，但可下載的 Windows
+執行檔沒有 Authenticode 簽章。
 
 Windows Authenticode unsigned：如果 GitHub Release 採用免費的未簽章發行方式，
 Windows 不會顯示經驗證的發行者，並可能警告或依本機政策阻擋下載或安裝。Tauri
@@ -28,6 +30,6 @@ ARM64 與 32-bit Windows。
 生成譜面需要人工檢查；驗證通過或匯入成功不代表符合排名要求。請遵守
 [AI 揭露與 osu! 上傳說明](../user/sharing.zh-TW.md)。
 
-測試前請閱讀[已知問題](known-issues.zh-TW.md)與
-[候選版驗收手冊](release-candidate-runbook.md)。`build-provenance.json` 記錄精確的
-來源 revision、工具版本與雜湊。
+安裝前請閱讀[已知問題](known-issues.zh-TW.md)。保留的
+[候選版驗收手冊](release-candidate-runbook.zh-TW.md)記錄建置與驗收流程；公開的
+`build-provenance.json` 記錄精確的來源 revision、工具版本與雜湊。
