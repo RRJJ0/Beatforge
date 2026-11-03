@@ -138,23 +138,6 @@ const validV020 = computed(
     ),
 )
 const effectivePublicTags = computed(() => publicTags(tags.value))
-const hasV020Changes = computed(
-  () =>
-    Boolean(
-      creator.value.trim() ||
-      titleUnicode.value.trim() ||
-      artistUnicode.value.trim() ||
-      songSource.value.trim() ||
-      tags.value.length,
-    ) ||
-    difficulties.value.some(
-      (item) =>
-        item.hpDrainRate !== null ||
-        item.overallDifficulty !== null ||
-        item.sliderMultiplier !== null ||
-        item.sliderTickRate !== null,
-    ),
-)
 const canGenerate = computed(() =>
   Boolean(
     audioFile.value &&
@@ -269,10 +252,6 @@ async function createJob() {
     message.warning(t('generate.invalidFields'))
     return
   }
-  if (hasV020Changes.value && validV020.value) {
-    message.warning(t('generate.v020Unavailable'))
-    return
-  }
   if (!canGenerate.value) {
     message.warning(t('generate.missing'))
     return
@@ -281,8 +260,14 @@ async function createJob() {
   try {
     const primary = difficulties.value[0]!
     await jobsStore.createJob({
+      requestSchemaVersion: 2,
       title: title.value.trim(),
       artist: artist.value.trim(),
+      creator: creator.value.trim() || null,
+      titleUnicode: titleUnicode.value.trim() || null,
+      artistUnicode: artistUnicode.value.trim() || null,
+      source: songSource.value.trim() || null,
+      tags: tags.value.map((tag) => tag.trim()),
       audioFile: audioFile.value,
       model: model.value,
       difficulty: primary.difficulty,
@@ -323,9 +308,6 @@ async function createJob() {
         </div>
         <NTag v-if="audioFile" size="small" type="success">{{ t('generate.audioReady') }}</NTag>
       </div>
-      <NAlert class="preview-note" type="info" :show-icon="false">{{
-        t('generate.v020Preview')
-      }}</NAlert>
 
       <div class="source-grid">
         <div>
@@ -765,9 +747,6 @@ async function createJob() {
       </div>
 
       <NAlert class="local-note" type="info" :show-icon="false">{{ t('generate.local') }}</NAlert>
-      <NAlert v-if="hasV020Changes" class="local-note" type="warning" :show-icon="false">{{
-        t('generate.v020Unavailable')
-      }}</NAlert>
       <div class="request-summary" aria-live="polite">
         <strong>{{ t('generate.requestSummary') }}</strong>
         <p>
@@ -1066,10 +1045,6 @@ async function createJob() {
 }
 .metadata-form :deep(.n-form-item) {
   margin-bottom: 10px;
-}
-.preview-note {
-  margin: 0 0 16px;
-  font-size: 11px;
 }
 .metadata-note {
   margin: 0 0 14px;

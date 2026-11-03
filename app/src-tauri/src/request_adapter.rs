@@ -14,6 +14,8 @@ const MAX_DESCRIPTOR_COUNT: usize = 16;
 const MAX_DESCRIPTOR_LENGTH: usize = 64;
 const MAX_SEED: u32 = 65_535;
 const MAX_DIFFICULTIES: usize = 8;
+const MAX_PUBLIC_TAGS: usize = 16;
+const MAX_PUBLIC_TAG_LENGTH: usize = 64;
 const REQUIRED_MODEL_FILES: [&str; 4] = [
     "model.safetensors",
     "config.json",
@@ -73,8 +75,18 @@ pub struct ProductionInferenceConfig {
     pub negative_descriptors: Vec<String>,
     pub title: String,
     pub artist: String,
+    pub request_schema_version: u8,
+    pub creator: Option<String>,
+    pub title_unicode: Option<String>,
+    pub artist_unicode: Option<String>,
+    pub source: Option<String>,
+    pub tags: Vec<String>,
     pub approach_rate: Option<f64>,
     pub circle_size: Option<f64>,
+    pub hp_drain_rate: Option<f64>,
+    pub overall_difficulty: Option<f64>,
+    pub slider_multiplier: Option<f64>,
+    pub slider_tick_rate: Option<f64>,
     pub hitsounded: bool,
     pub device: String,
     pub precision: String,
@@ -91,6 +103,10 @@ fn legacy_difficulty(input: &StartJobInput) -> DifficultyRequest {
         negative_descriptors: input.negative_descriptors.clone(),
         approach_rate: input.approach_rate,
         circle_size: input.circle_size,
+        hp_drain_rate: None,
+        overall_difficulty: None,
+        slider_multiplier: None,
+        slider_tick_rate: None,
         hitsounded: input.hitsounded,
     }
 }
@@ -146,9 +162,69 @@ fn validate_rating(value: Option<f64>, label: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_optional_text(value: Option<&str>, label: &str) -> Result<(), String> {
+    if let Some(value) = value {
+        if value.chars().any(char::is_control) {
+            return Err(format!("{label} cannot contain control characters"));
+        }
+        if !value.trim().is_empty() {
+            validate_text(value, label)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_public_tags(tags: &[String]) -> Result<(), String> {
+    if tags.len() > MAX_PUBLIC_TAGS {
+        return Err(format!("Tags accepts at most {MAX_PUBLIC_TAGS} values"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for tag in tags {
+        let tag = tag.trim();
+        if tag.is_empty()
+            || tag.chars().count() > MAX_PUBLIC_TAG_LENGTH
+            || tag.chars().any(|character| {
+                character.is_whitespace()
+                    || character.is_control()
+                    || matches!(character, ':' | '=' | '[' | ']')
+            })
+            || !seen.insert(tag.to_lowercase())
+        {
+            return Err("Tags must be unique, single words of 1 to 64 safe characters".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_slider(value: Option<f64>, label: &str) -> Result<(), String> {
+    if let Some(value) = value
+        && (!value.is_finite() || !(0.1..=10.0).contains(&value))
+    {
+        return Err(format!("{label} must be between 0.1 and 10"));
+    }
+    Ok(())
+}
+
 pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
+    if !matches!(input.request_schema_version, 1 | 2) {
+        return Err("Unsupported request schema version".into());
+    }
     validate_text(&input.title, "Title")?;
     validate_text(&input.artist, "Artist")?;
+    validate_optional_text(input.creator.as_deref(), "Creator")?;
+    validate_optional_text(input.title_unicode.as_deref(), "TitleUnicode")?;
+    validate_optional_text(input.artist_unicode.as_deref(), "ArtistUnicode")?;
+    validate_optional_text(input.source.as_deref(), "Source")?;
+    validate_public_tags(&input.tags)?;
+    if input.request_schema_version == 1
+        && (input.creator.is_some()
+            || input.title_unicode.is_some()
+            || input.artist_unicode.is_some()
+            || input.source.is_some()
+            || !input.tags.is_empty())
+    {
+        return Err("0.2.0 metadata requires request schema version 2".into());
+    }
     let difficulties = requested_difficulties(input);
     if difficulties.is_empty() || difficulties.len() > MAX_DIFFICULTIES {
         return Err(format!(
@@ -196,6 +272,18 @@ pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
         }
         validate_rating(difficulty.approach_rate, "Approach rate")?;
         validate_rating(difficulty.circle_size, "Circle size")?;
+        validate_rating(difficulty.hp_drain_rate, "HP drain rate")?;
+        validate_rating(difficulty.overall_difficulty, "Overall difficulty")?;
+        validate_slider(difficulty.slider_multiplier, "Slider multiplier")?;
+        validate_slider(difficulty.slider_tick_rate, "Slider tick rate")?;
+        if input.request_schema_version == 1
+            && (difficulty.hp_drain_rate.is_some()
+                || difficulty.overall_difficulty.is_some()
+                || difficulty.slider_multiplier.is_some()
+                || difficulty.slider_tick_rate.is_some())
+        {
+            return Err("0.2.0 difficulty settings require request schema version 2".into());
+        }
     }
     validate_input_file(
         Path::new(&input.audio_file),
@@ -382,8 +470,38 @@ pub fn build(
                 .collect(),
             title: input.title.trim().into(),
             artist: input.artist.trim().into(),
+            request_schema_version: input.request_schema_version,
+            creator: input
+                .creator
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            title_unicode: input
+                .title_unicode
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            artist_unicode: input
+                .artist_unicode
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            source: input
+                .source
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            tags: input.tags.iter().map(|tag| tag.trim().to_owned()).collect(),
             approach_rate: difficulty.approach_rate,
             circle_size: difficulty.circle_size,
+            hp_drain_rate: difficulty.hp_drain_rate,
+            overall_difficulty: difficulty.overall_difficulty,
+            slider_multiplier: difficulty.slider_multiplier,
+            slider_tick_rate: difficulty.slider_tick_rate,
             hitsounded: difficulty.hitsounded,
             device: context.device.clone(),
             precision: context.precision.clone(),
@@ -441,8 +559,14 @@ mod tests {
         let audio = root.join("song.mp3");
         fs::write(&audio, "fixture").unwrap();
         let input = StartJobInput {
+            request_schema_version: 1,
             title: "Song".into(),
             artist: "Artist".into(),
+            creator: None,
+            title_unicode: None,
+            artist_unicode: None,
+            source: None,
+            tags: vec![],
             audio_file: path_string(&audio),
             model: packages::STANDARD_MODEL_ID.into(),
             difficulty: 5.2,
@@ -540,6 +664,10 @@ mod tests {
                 negative_descriptors: vec![],
                 approach_rate: Some(7.0),
                 circle_size: Some(4.0),
+                hp_drain_rate: None,
+                overall_difficulty: None,
+                slider_multiplier: None,
+                slider_tick_rate: None,
                 hitsounded: true,
             },
             DifficultyRequest {
@@ -551,6 +679,10 @@ mod tests {
                 negative_descriptors: vec![],
                 approach_rate: Some(9.5),
                 circle_size: Some(4.2),
+                hp_drain_rate: None,
+                overall_difficulty: None,
+                slider_multiplier: None,
+                slider_tick_rate: None,
                 hitsounded: false,
             },
         ];
@@ -563,6 +695,63 @@ mod tests {
         assert_eq!(command.configs[1].difficulty, 6.2);
         assert_eq!(command.configs[1].seed, 22);
         assert!(!command.configs[1].hitsounded);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn forwards_v020_metadata_and_independent_difficulty_settings() {
+        let (root, mut input, context) = fixture();
+        input.request_schema_version = 2;
+        input.creator = Some("  Human Mapper  ".into());
+        input.title_unicode = Some("原文歌名".into());
+        input.artist_unicode = Some("原文歌手".into());
+        input.source = Some("Game".into());
+        input.tags = vec!["electronic".into()];
+        let mut first = legacy_difficulty(&input);
+        first.hp_drain_rate = Some(6.0);
+        first.overall_difficulty = Some(8.5);
+        first.slider_multiplier = Some(1.6);
+        first.slider_tick_rate = Some(2.0);
+        let mut second = first.clone();
+        second.id = "difficulty-2".into();
+        second.name = "Hard".into();
+        second.hp_drain_rate = Some(4.0);
+        second.slider_multiplier = None;
+        input.difficulties = vec![first, second];
+
+        let command = build("BF-v020", &input, &context).unwrap();
+        assert_eq!(command.protocol_version, 2);
+        assert_eq!(command.configs[0].creator.as_deref(), Some("Human Mapper"));
+        assert_eq!(
+            command.configs[1].title_unicode.as_deref(),
+            Some("原文歌名")
+        );
+        assert_eq!(command.configs[0].slider_multiplier, Some(1.6));
+        assert_eq!(command.configs[1].slider_multiplier, None);
+        assert_eq!(command.configs[1].hp_drain_rate, Some(4.0));
+        assert_eq!(command.configs[0].tags, vec!["electronic"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_invalid_v020_fields_before_creating_output() {
+        let (root, mut input, context) = fixture();
+        input.request_schema_version = 2;
+        input.tags = vec!["seed=42".into()];
+        assert!(validate_domain(&input).unwrap_err().contains("Tags"));
+        input.tags.clear();
+        input.creator = Some("bad\ncreator".into());
+        assert!(validate_domain(&input).unwrap_err().contains("Creator"));
+        input.creator = None;
+        let mut difficulty = legacy_difficulty(&input);
+        difficulty.slider_multiplier = Some(f64::NAN);
+        input.difficulties = vec![difficulty];
+        assert!(
+            validate_domain(&input)
+                .unwrap_err()
+                .contains("Slider multiplier")
+        );
+        assert!(!context.jobs_root.join("BF-invalid").exists());
         let _ = fs::remove_dir_all(root);
     }
 

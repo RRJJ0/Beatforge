@@ -95,10 +95,6 @@ const messages = {
     'generate.requestSummary': 'Before you generate',
     'generate.summaryFallback':
       '— means unset: the pinned V32 default applies, or the reference beatmap supplies the value.',
-    'generate.v020Unavailable':
-      '0.2.0 fields are a preview. Generation with these values is paused until request and worker support is implemented.',
-    'generate.v020Preview':
-      '0.2.0 metadata and difficulty controls are an editable preview. Existing 0.1.0 generation remains available when these fields are empty.',
     'generate.invalidFields': 'Check the highlighted 0.2.0 fields before continuing.',
     'generate.songTitle': 'Song title',
     'generate.artistName': 'Artist name',
@@ -374,10 +370,6 @@ const messages = {
     'generate.inheritDefault': '預設／參考譜面',
     'generate.requestSummary': '生成前確認',
     'generate.summaryFallback': '— 代表未設定：使用固定 V32 預設值，或繼承參考譜面。',
-    'generate.v020Unavailable':
-      '0.2.0 欄位目前是預覽；request 與 worker 尚未接通，填入這些值時會暫停送出。',
-    'generate.v020Preview':
-      '0.2.0 歌曲與難度欄位目前可編輯預覽；保持新欄位空白時，仍可使用既有 0.1.0 生成功能。',
     'generate.invalidFields': '請先檢查標示的 0.2.0 欄位。',
     'generate.songTitle': '歌曲名稱',
     'generate.artistName': '演出者名稱',

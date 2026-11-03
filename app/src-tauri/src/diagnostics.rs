@@ -662,8 +662,14 @@ mod tests {
         let paths = paths(&root);
         let connection = database();
         let input = StartJobInput {
+            request_schema_version: 1,
             title: "TOP SECRET SONG TITLE".into(),
             artist: "PRIVATE ARTIST".into(),
+            creator: None,
+            title_unicode: None,
+            artist_unicode: None,
+            source: None,
+            tags: vec![],
             audio_file: r"C:\Users\SecretUser\Music\private-song.flac".into(),
             model: packages::STANDARD_MODEL_ID.into(),
             difficulty: 5.0,

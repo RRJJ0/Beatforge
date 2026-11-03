@@ -29,6 +29,7 @@ export interface GenerationProvenance {
     peak_gpu_memory_mb?: number
   }
   parameters: Record<string, unknown>
+  settings?: Record<string, { requested: unknown; applied: unknown; origin: string }>
   input: Record<string, unknown>
   output: Record<string, unknown>
   timing: { started_at: string; completed_at: string; elapsed_seconds: number }
@@ -139,12 +140,22 @@ export interface DifficultyRequest {
   negativeDescriptors: string[]
   approachRate?: number
   circleSize?: number
+  hpDrainRate?: number | null
+  overallDifficulty?: number | null
+  sliderMultiplier?: number | null
+  sliderTickRate?: number | null
   hitsounded: boolean
 }
 
 export interface StartJobInput {
+  requestSchemaVersion?: number
   title: string
   artist: string
+  creator?: string | null
+  titleUnicode?: string | null
+  artistUnicode?: string | null
+  source?: string | null
+  tags?: string[]
   audioFile: string
   model: string
   difficulty: number
