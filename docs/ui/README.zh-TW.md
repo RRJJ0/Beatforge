@@ -2,9 +2,14 @@
 
 [English](README.md) · [開發者文件](../development/README.zh-TW.md)
 
-第一版桌面線框圖的主要來源是 `osu-ai-desktop-wireframes.drawio`，共 14 頁，
+第一版桌面線框圖的主要來源是 `osu-ai-desktop-wireframes.drawio`，共 15 頁，
 涵蓋資訊架構、首次設定、生成、任務狀態、結果、歷史、模型、設定、對話框、
 通知與元件參考。
+
+0.2.0 已確認的生成頁線框另存為[可編輯 draw.io 線框圖](beatforge-v020-generate.drawio)，
+可先看 [PNG 預覽](exports/16-generate-v020.png) 或
+[SVG 向量版](exports/16-generate-v020.svg)。畫面中的數值是版面示例，
+預設值與合法範圍依[欄位契約](../development/v0.2.0-field-contract.zh-TW.md)。
 
 ## 視覺方向
 

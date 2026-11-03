@@ -19,6 +19,8 @@ $pairs = @(
     @('docs/testing/stage-9-gpu-support-matrix.md', 'docs/testing/stage-9-gpu-support-matrix.zh-TW.md'),
     @('docs/legal/licensing-and-distribution.md', 'docs/legal/licensing-and-distribution.zh-TW.md'),
     @('docs/development/README.md', 'docs/development/README.zh-TW.md'),
+    @('docs/development/v0.2.0-plan.md', 'docs/development/v0.2.0-plan.zh-TW.md'),
+    @('docs/development/v0.2.0-field-contract.md', 'docs/development/v0.2.0-field-contract.zh-TW.md'),
     @('docs/development/roadmap.md', 'docs/development/roadmap.zh-TW.md'),
     @('docs/ui/README.md', 'docs/ui/README.zh-TW.md')
 )

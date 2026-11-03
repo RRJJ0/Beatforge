@@ -683,7 +683,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     if config.get("config_name") != "v32" or config.get("gamemode") != 0:
         raise ValueError("Only the pinned V32 osu!standard configuration is supported")
     difficulty_id = config.get("difficulty_id", "difficulty-1")
-    difficulty_name = config.get("difficulty_name") or f"AI {config.get('difficulty', 0):.1f}★"
+    difficulty_name = config.get("difficulty_name") or f"AI {config.get('difficulty', 0):.1f}s"
     if not isinstance(difficulty_id, str) or not difficulty_id.strip() or len(difficulty_id) > 200:
         raise ValueError("difficulty_id is invalid")
     if not isinstance(difficulty_name, str) or not difficulty_name.strip() or len(difficulty_name) > 200:

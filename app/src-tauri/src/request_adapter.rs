@@ -84,7 +84,7 @@ pub struct ProductionInferenceConfig {
 fn legacy_difficulty(input: &StartJobInput) -> DifficultyRequest {
     DifficultyRequest {
         id: "difficulty-1".into(),
-        name: format!("AI {:.1}★", input.difficulty),
+        name: format!("AI {:.1}s", input.difficulty),
         difficulty: input.difficulty,
         seed: input.seed,
         descriptors: input.descriptors.clone(),
@@ -482,6 +482,7 @@ mod tests {
     fn builds_only_resolved_managed_paths_and_whitelisted_config() {
         let (root, input, context) = fixture();
         let command = build("BF-test_1", &input, &context).unwrap();
+        assert_eq!(command.config.difficulty_name, "AI 5.2s");
         assert_eq!(command.config.gamemode, 0);
         assert_eq!(command.config.seed, 12345);
         assert!(command.config.repair_generated_output);

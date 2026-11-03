@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">Beatforge 0.2.0 Generate screen wireframe</title>
+  <desc id="desc">Desktop wireframe showing shared song metadata on the left, selected difficulty controls on the right, and a generation summary at the bottom.</desc>
+  <style>
+    text { font-family: Arial, sans-serif; fill: #edf0f7; font-size: 14px; }
+    .muted { fill: #aab2c2; font-size: 12px; }
+    .label { fill: #cbd3e0; font-size: 12px; font-weight: 700; }
+    .heading { font-size: 23px; font-weight: 700; }
+    .section { font-size: 17px; font-weight: 700; }
+    .field { fill: #161c2a; stroke: #536074; stroke-width: 1; rx: 6; }
+    .card { fill: #242c3b; stroke: #48546a; stroke-width: 1; rx: 12; }
+    .pink { fill: #ff66aa; }
+  </style>
+  <rect width="1440" height="900" fill="#141a26"/>
+  <rect width="224" height="900" fill="#1c2331"/>
+  <text x="28" y="42" font-size="21" font-weight="700">Beatforge</text>
+  <text x="28" y="97" class="muted">WORKSPACE</text>
+  <rect x="12" y="119" width="200" height="45" rx="8" fill="#3b2c43"/>
+  <rect x="12" y="119" width="4" height="45" class="pink"/>
+  <text x="32" y="147" font-weight="700">生成 / Generate</text>
+  <text x="32" y="204" class="muted">任務 / Jobs</text>
+  <text x="32" y="248" class="muted">歷史紀錄 / History</text>
+  <text x="32" y="292" class="muted">模型 / Models</text>
+  <text x="32" y="336" class="muted">設定 / Settings</text>
+  <rect x="224" width="1216" height="72" fill="#1c2331"/>
+  <text x="256" y="44" class="heading">建立譜面集</text>
+  <text x="1125" y="44" class="muted">V32 · osu!standard · Local</text>
+  <text x="256" y="111" class="muted">0.2.0 WIREFRAME  ·  歌曲資料套用到全部難度；右側只編輯所選難度</text>
+
+  <rect class="card" x="256" y="137" width="455" height="640"/>
+  <text x="280" y="174" class="section">歌曲與譜面集</text>
+  <text x="280" y="196" class="muted">共用資料會寫入每一張產出的 .osu</text>
+  <rect class="field" x="280" y="214" width="407" height="49"/>
+  <text x="296" y="244">♪  song.mp3</text>
+  <text x="280" y="289" class="label">標題 Title *</text>
+  <rect class="field" x="280" y="300" width="193" height="38"/>
+  <text x="292" y="324">Example Song</text>
+  <text x="494" y="289" class="label">歌手 Artist *</text>
+  <rect class="field" x="494" y="300" width="193" height="38"/>
+  <text x="506" y="324">Example Artist</text>
+  <text x="280" y="359" class="label">譜師 Creator</text>
+  <rect class="field" x="280" y="370" width="407" height="38"/>
+  <text x="292" y="394">Beatforge AI</text>
+  <text x="280" y="430" class="label">原文標題 TitleUnicode</text>
+  <rect class="field" x="280" y="441" width="193" height="38"/>
+  <text x="292" y="465" class="muted">選填</text>
+  <text x="494" y="430" class="label">原文歌手 ArtistUnicode</text>
+  <rect class="field" x="494" y="441" width="193" height="38"/>
+  <text x="506" y="465" class="muted">選填</text>
+  <text x="280" y="501" class="label">來源 Source</text>
+  <rect class="field" x="280" y="512" width="407" height="38"/>
+  <text x="292" y="536" class="muted">專輯、遊戲或其他來源 · 選填</text>
+  <text x="280" y="572" class="label">公開標籤 Tags</text>
+  <rect class="field" x="280" y="583" width="407" height="48"/>
+  <rect x="292" y="592" width="68" height="29" rx="14" fill="#394a62"/>
+  <text x="303" y="612" font-size="12">electronic</text>
+  <text x="372" y="612" class="muted">+ 新增標籤</text>
+  <text x="280" y="651" class="muted">標籤會公開；生成提示詞和 seed 不會加入。</text>
+  <rect x="280" y="682" width="407" height="68" rx="8" fill="#1b2533" stroke="#536074"/>
+  <text x="296" y="706" class="label">選用素材</text>
+  <text x="296" y="729" class="muted">參考譜面 · 背景圖片 · 背景影片</text>
+
+  <rect class="card" x="735" y="137" width="673" height="640"/>
+  <text x="759" y="174" class="section">生成設定</text>
+  <text x="759" y="196" class="muted">模型：Mapperatorinator V32</text>
+  <rect x="759" y="218" width="180" height="510" rx="8" fill="#1c2432" stroke="#46536a"/>
+  <text x="775" y="246" class="label">難度清單</text>
+  <rect x="775" y="264" width="148" height="65" rx="7" fill="#3b2c43" stroke="#ff66aa"/>
+  <text x="786" y="289" font-weight="700">AI 4.8s</text>
+  <text x="786" y="311" class="muted">AR 9 · CS 4</text>
+  <rect x="775" y="339" width="148" height="58" rx="7" fill="#273244"/>
+  <text x="786" y="362">AI 5.6s</text>
+  <text x="786" y="383" class="muted">AR 9 · CS 4</text>
+  <rect x="775" y="413" width="148" height="34" rx="6" fill="#303b50" stroke="#536074"/>
+  <text x="793" y="435" font-size="12">+ 新增難度</text>
+  <text x="775" y="694" class="muted">最多 8 個難度</text>
+
+  <text x="963" y="247" class="label">正在編輯 AI 4.8s</text>
+  <text x="963" y="279" class="label">難度名稱</text>
+  <rect class="field" x="963" y="290" width="241" height="38"/>
+  <text x="975" y="314">AI 4.8s</text>
+  <text x="1222" y="279" class="label">目標星數</text>
+  <rect class="field" x="1222" y="290" width="162" height="38"/>
+  <text x="1234" y="314">4.8 ★</text>
+  <text x="963" y="352" class="label">風格提示詞</text>
+  <rect class="field" x="963" y="363" width="421" height="42"/>
+  <text x="975" y="389" class="muted">正向 / 排除標籤…</text>
+  <text x="963" y="433" class="section">進階難度設定  ▾</text>
+  <text x="963" y="454" class="muted">AR · CS · HP · OD · 滑條速度 · 滑條點倍率</text>
+  <text x="963" y="481" class="label">AR</text><text x="1108" y="481" class="label">CS</text><text x="1253" y="481" class="label">HP</text>
+  <rect class="field" x="963" y="492" width="128" height="39"/><rect class="field" x="1108" y="492" width="128" height="39"/><rect class="field" x="1253" y="492" width="131" height="39"/>
+  <text x="977" y="518">9.0</text><text x="1122" y="518">4.0</text><text x="1267" y="518">5.0</text>
+  <text x="963" y="555" class="label">OD</text><text x="1108" y="555" class="label">基本滑條速度</text><text x="1253" y="555" class="label">滑條點倍率</text>
+  <rect class="field" x="963" y="566" width="128" height="39"/><rect class="field" x="1108" y="566" width="128" height="39"/><rect class="field" x="1253" y="566" width="131" height="39"/>
+  <text x="977" y="592">8.0</text><text x="1122" y="592">1.4×</text><text x="1267" y="592">1.0×</text>
+  <text x="963" y="636" class="muted">只套用到「AI 4.8s」；切換難度會保留各自設定。</text>
+  <text x="963" y="672" class="label">Seed  [ 12345 ]       預測音效  ● 開</text>
+  <rect x="963" y="691" width="421" height="44" rx="7" fill="#18302c" stroke="#3d7769"/>
+  <text x="976" y="718" class="muted">送出前顯示 2 個難度與共用 metadata 摘要</text>
+
+  <rect x="256" y="800" width="1152" height="72" rx="10" fill="#242c3b" stroke="#48546a"/>
+  <text x="280" y="829" font-weight="700">準備生成 2 個難度</text>
+  <text x="280" y="851" class="muted">確認歌曲資料與每難度設定後建立任務</text>
+  <rect x="1219" y="814" width="165" height="44" rx="8" class="pink"/>
+  <text x="1252" y="842" style="fill:#1b1721" font-weight="700">生成 2 個難度</text>
+</svg>
