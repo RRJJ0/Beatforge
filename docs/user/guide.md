@@ -45,6 +45,14 @@ update preferences, and backup/reset controls.
 4. Select **Generate**. Jobs run one at a time. The **Jobs** page shows progress
    and validation. You can review earlier jobs in **History**.
 
+### New settings in the 0.2.0 development build
+
+The in-development 0.2.0 build adds shared **Creator, Unicode title/artist, song source, and public tags**, plus per-difficulty **HP, OD, base slider multiplier, and slider tick rate** under advanced controls. Check which difficulty is selected before editing its values, then review the summary before submission. These fields are not available in the published 0.1.0 release.
+
+When optional fields are blank, Creator becomes `Beatforge AI`, Unicode title/artist follow the regular title/artist, and Source is empty. Public Tags still include the `Beatforge AI mapperatorinator` disclosure. Without a reference beatmap, HP/OD/slider multiplier/slider tick rate default to `5`/`8`/`1.4`/`1`. With a same-song reference, omitted difficulty values inherit its settings; this was verified with a real generation and osu! playtest. These are base beatmap values and generation settings, not a guarantee of star rating or mapping quality.
+
+Retry after interruption uses the stored original request. Each generated difficulty is checked against its effective metadata and numeric settings before completion; a mismatch prevents a completed result. See the [draft 0.2.0 notes](../release/v0.2.0-release-notes.md) and [draft known limits](../release/v0.2.0-known-issues.md) for scope and remaining checks.
+
 ![Generate page showing song assets and difficulty controls](../demoImage/generate.png)
 
 **Jobs** shows the queue and each difficulty's validation status. **History**

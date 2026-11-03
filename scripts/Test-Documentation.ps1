@@ -13,6 +13,8 @@ $pairs = @(
     @('docs/user/sharing.md', 'docs/user/sharing.zh-TW.md'),
     @('docs/release/release-notes.md', 'docs/release/release-notes.zh-TW.md'),
     @('docs/release/known-issues.md', 'docs/release/known-issues.zh-TW.md'),
+    @('docs/release/v0.2.0-release-notes.md', 'docs/release/v0.2.0-release-notes.zh-TW.md'),
+    @('docs/release/v0.2.0-known-issues.md', 'docs/release/v0.2.0-known-issues.zh-TW.md'),
     @('docs/release/release-candidate-runbook.md', 'docs/release/release-candidate-runbook.zh-TW.md'),
     @('docs/release/windows-installer.md', 'docs/release/windows-installer.zh-TW.md'),
     @('docs/release/updates-and-recovery.md', 'docs/release/updates-and-recovery.zh-TW.md'),

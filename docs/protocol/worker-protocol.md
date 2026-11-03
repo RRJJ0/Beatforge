@@ -23,6 +23,8 @@ Production commands use snake-case protocol fields and contain only adapter-appr
 
 Each production difficulty config includes `request_schema_version`, shared `creator`, `title_unicode`, `artist_unicode`, `source`, and public `tags`, plus optional per-difficulty `hp_drain_rate`, `overall_difficulty`, `slider_multiplier`, and `slider_tick_rate`. The current UI sends request schema `2`; requests saved before 0.2.0 deserialize as schema `1`. A missing numeric value inherits the reference beatmap when present, otherwise the pinned V32 default. Schema `2` uses an empty `Source` when omitted; schema `1` keeps the original reference-source behavior. Unknown config fields and invalid values are rejected before inference.
 
+`configs` contains one entry per requested difficulty (up to eight); `config` repeats the first entry for the single-difficulty path. Rust persists the original request before launching the worker. A retry reads that stored request, then validates and adapts it again under the pinned source/model identities. The worker applies shared metadata and per-difficulty values before upstream `compile_args`, so the settings can affect both generation and the exported `.osu`. Without a reference, omitted HP/OD/slider multiplier/slider tick rate use V32 defaults `5`/`8`/`1.4`/`1`.
+
 ## Progress
 
 ```json
@@ -38,6 +40,8 @@ Each production difficulty config includes `request_schema_version`, shared `cre
 `provenance` is required for the production worker and omitted by the mock worker. Rust stores it in the job's existing `result_json` column before changing the job to `completed`. A missing or unpersistable production record is a terminal protocol failure.
 
 Provenance schema `2` adds `settings` with requested (including `null`), applied, and origin (`explicit`, `reference`, `upstream_default`, or `fallback`) for each public metadata and difficulty field. Multi-difficulty jobs retain this per-difficulty provenance inside `difficulties`; schema `1` historical records remain readable.
+
+Before sending `completed`, the production worker opens the final `.osz` and compares each `.osu` to its own effective metadata and numeric settings. It checks the no-reference V32 numeric defaults as well. A missing difficulty, invalid scalar, or mismatch fails the job. The Rust validator then checks archive paths, referenced assets, beatmap structure, and gameplay semantics before publishing a validated artifact. For multi-difficulty jobs, generation or validation may exclude a failed member; the corresponding `difficulties` entry records its status and warnings identify exclusions. A validated result does not assert mapping quality.
 
 ## Failed
 
