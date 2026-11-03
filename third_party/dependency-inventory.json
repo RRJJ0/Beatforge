@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "generatedFrom": {
-    "cargoLockSha256": "b63e2b1e25cde0d6489b303bf100c02213f8f96181e22c0ba6e644cee91cf858",
+    "cargoLockSha256": "4ccff902db5aeb0c0454a023b6dbd6c377e9911ffb91a3c065aa9f9a05eaa923",
     "pnpmLockSha256": "d0b11c0292ecd3ff9f0454d2c30e9893e9a0ac7d137158c23a97c7fccb26e477",
     "pythonRequirementsSha256": "bfe25261920994e369bd9e2b0eb2eb37396f96dd319f9d74d7060c70fe05d34a",
     "mapperatorinatorLockSha256": "3a91c6ec6ed1c1b88b6edaf4a5142b90f36736dcd1cbfe2a7258bbe66fb8e41f",
@@ -103,7 +103,7 @@
     },
     {
       "name": "app",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "license": "MIT",
       "authors": [
         "RRJJ0"

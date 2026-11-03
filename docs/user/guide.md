@@ -53,6 +53,8 @@ When optional fields are blank, Creator becomes `Beatforge AI`, Unicode title/ar
 
 Retry after interruption uses the stored original request. Each generated difficulty is checked against its effective metadata and numeric settings before completion; a mismatch prevents a completed result. See the [draft 0.2.0 notes](../release/v0.2.0-release-notes.md) and [draft known limits](../release/v0.2.0-known-issues.md) for scope and remaining checks.
 
+Positive and negative descriptors guide generation style. In the 0.2.0 development build, entering negative descriptors enables stronger model guidance (`cfg_scale=1.5`); leaving them empty retains V32's `1.0`. Descriptors do not guarantee a particular rhythm, object density, or mapping quality.
+
 ![Generate page showing song assets and difficulty controls](../demoImage/generate.png)
 
 **Jobs** shows the queue and each difficulty's validation status. **History**

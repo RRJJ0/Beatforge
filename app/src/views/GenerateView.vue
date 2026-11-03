@@ -591,7 +591,7 @@ async function createJob() {
               <NFormItem :label="t('generate.descriptors')"
                 ><NDynamicTags v-model:value="selectedDifficulty.descriptors"
               /></NFormItem>
-              <NFormItem :label="t('generate.negative')"
+              <NFormItem :label="t('generate.negative')" :feedback="t('generate.negativeHelp')"
                 ><NDynamicTags v-model:value="selectedDifficulty.negativeDescriptors"
               /></NFormItem>
             </div>

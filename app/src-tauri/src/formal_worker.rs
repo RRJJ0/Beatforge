@@ -11,7 +11,7 @@ use std::{
 };
 
 const WORKER_SOURCE: &str = include_str!("../resources/python/beatforge_worker.py");
-const WORKER_VERSION: &str = "14";
+const WORKER_VERSION: &str = "15";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 
@@ -275,11 +275,11 @@ mod tests {
     #[test]
     fn parses_versioned_health_message() {
         let health = parse_health(
-            r#"{"type":"health","protocol_version":2,"worker_version":"14","ready":true,"python_version":"3.10.21","python_executable":"python.exe","pytorch_version":"2.10.0","cuda_runtime":"13.0","cuda_available":true,"gpu_name":"GPU","ffmpeg_version":"7.0","ffmpeg_executable":"ffmpeg.exe","mapperatorinator_commit":"abc","model_version":"32.test","model_path":"model","errors":[]}"#,
+            r#"{"type":"health","protocol_version":2,"worker_version":"15","ready":true,"python_version":"3.10.21","python_executable":"python.exe","pytorch_version":"2.10.0","cuda_runtime":"13.0","cuda_available":true,"gpu_name":"GPU","ffmpeg_version":"7.0","ffmpeg_executable":"ffmpeg.exe","mapperatorinator_commit":"abc","model_version":"32.test","model_path":"model","errors":[]}"#,
         )
         .unwrap();
         assert!(health.ready);
-        assert_eq!(health.worker_version, "14");
+        assert_eq!(health.worker_version, "15");
     }
 
     #[test]

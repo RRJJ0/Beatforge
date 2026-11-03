@@ -25,8 +25,9 @@ import zipfile
 
 
 PROTOCOL_VERSION = 2
-WORKER_VERSION = "14"
+WORKER_VERSION = "15"
 PUBLIC_BEATMAP_TAGS = "Beatforge AI mapperatorinator"
+NEGATIVE_DESCRIPTOR_CFG_SCALE = 1.5
 MAX_MESSAGE_BYTES = 64 * 1024
 PROGRESS_WINDOW = (0.0, 100.0)
 MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, Any]] = {}
@@ -476,6 +477,14 @@ def require_descriptors(value: Any, label: str) -> list[str]:
     return normalized
 
 
+def apply_descriptor_guidance(args: Any, negative_descriptors: list[str]) -> None:
+    # Upstream only constructs the negative prompt when cfg_scale > 1.
+    # Keep the V32 default for jobs without exclusions so existing output stays
+    # reproducible, and enable modest guidance only when exclusions are used.
+    if negative_descriptors:
+        args.cfg_scale = max(args.cfg_scale, NEGATIVE_DESCRIPTOR_CFG_SCALE)
+
+
 def require_optional_metadata_text(value: Any, label: str) -> str | None:
     if value is None:
         return None
@@ -892,6 +901,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         args.seed = seed
         args.descriptors = positive
         args.negative_descriptors = negative
+        apply_descriptor_guidance(args, negative)
         args.title = config["title"].strip()
         args.artist = config["artist"].strip()
         apply_public_request_fields(args, config)

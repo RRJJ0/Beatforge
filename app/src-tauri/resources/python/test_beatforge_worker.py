@@ -8,6 +8,16 @@ import beatforge_worker as worker
 
 
 class BeatmapMetadataTests(unittest.TestCase):
+    def test_negative_descriptors_enable_guidance_without_changing_other_jobs(self):
+        ordinary = SimpleNamespace(cfg_scale=1.0)
+        worker.apply_descriptor_guidance(ordinary, [])
+        self.assertEqual(ordinary.cfg_scale, 1.0)
+
+        excluded = SimpleNamespace(cfg_scale=1.0)
+        worker.apply_descriptor_guidance(excluded, ["skillset/streams"])
+        self.assertGreater(excluded.cfg_scale, 1.0)
+        self.assertEqual(excluded.cfg_scale, worker.NEGATIVE_DESCRIPTOR_CFG_SCALE)
+
     def test_public_tags_do_not_expose_private_generation_parameters(self):
         args = SimpleNamespace(tags=None)
 
