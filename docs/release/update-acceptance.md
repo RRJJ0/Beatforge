@@ -4,6 +4,8 @@
 
 This test uses `https://localhost` in a disposable Windows account or VM. No public host or GitHub Release is needed. It exercises a real HTTPS download and the updater signature with two distinct SemVer versions, while leaving the checked-in production endpoint and embedded public key unchanged. The test build shares Beatforge's normal application ID and data location: **never install it in your everyday account**.
 
+For 0.1.0 → 0.2.0 acceptance, pass `-OldVersion 0.1.0 -OldSourceDirectory <exact 0.1.0 release checkout>`. The tool changes only the updater endpoint in the isolated old-version build, so the test runs the actual 0.1.0 source code, although its installer is not byte-for-byte identical to the published artifact. Verify the production GitHub endpoint separately when publishing.
+
 1. On the development machine, use a verified `0.1.0` candidate artifact to prepare the bundle. This builds a `0.0.9` installer with a test-only updater endpoint. The older installer is Authenticode-unsigned; the newer candidate must have a valid Tauri updater signature. Choose a free local port if `48765` is in use.
 
    ```powershell

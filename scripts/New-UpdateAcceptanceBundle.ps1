@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ManifestUrl,
     [Parameter(Mandatory)][string]$InstallerUrl,
     [string]$OldVersion = '0.0.9',
+    [string]$OldSourceDirectory,
     [string]$OutputDirectory
 )
 
@@ -70,6 +71,33 @@ if ($installerUri.Segments[-1] -ne $newInstaller[0].Name) {
     throw 'InstallerUrl must end with the exact new installer filename'
 }
 
+$oldSourceMode = 'current-source-overlay'
+$oldSourceCommit = (& git.exe -C $repoRoot rev-parse HEAD).Trim()
+$oldAppRoot = $appRoot
+if (-not [string]::IsNullOrWhiteSpace($OldSourceDirectory)) {
+    $oldSourceRoot = [System.IO.Path]::GetFullPath($OldSourceDirectory)
+    $oldConfigPath = Join-Path $oldSourceRoot 'app\src-tauri\tauri.conf.json'
+    if (-not (Test-Path -LiteralPath $oldConfigPath -PathType Leaf)) {
+        throw 'OldSourceDirectory has no Tauri application configuration'
+    }
+    $oldConfig = Get-Content -LiteralPath $oldConfigPath -Raw | ConvertFrom-Json
+    if ([string]$oldConfig.version -ne $OldVersion) {
+        throw 'OldSourceDirectory version does not match OldVersion'
+    }
+    $oldSourceCommit = (& git.exe -C $oldSourceRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $oldSourceCommit -notmatch '^[0-9a-f]{40}$') {
+        throw 'OldSourceDirectory must be an exact Git checkout'
+    }
+    if (@(& git.exe -C $oldSourceRoot status --porcelain).Count -gt 0) {
+        throw 'OldSourceDirectory must be a clean Git checkout'
+    }
+    $oldSourceMode = 'pinned-source'
+    $oldAppRoot = Join-Path $oldSourceRoot 'app'
+    if (-not (Test-Path -LiteralPath (Join-Path $oldAppRoot 'node_modules') -PathType Container)) {
+        throw 'OldSourceDirectory frontend dependencies are missing'
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repoRoot ('artifacts\update-acceptance\' + [DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss'))
 }
@@ -91,7 +119,7 @@ $overlay = [ordered]@{
 [System.IO.File]::WriteAllText($overlayPath, ($overlay | ConvertTo-Json -Depth 8) + "`n", [System.Text.UTF8Encoding]::new($false))
 
 $buildStarted = [DateTime]::UtcNow
-Push-Location $appRoot
+Push-Location $oldAppRoot
 try {
     & pnpm.cmd tauri build --bundles nsis --ci --no-sign --config $overlayPath
     if ($LASTEXITCODE -ne 0) { throw "Old-version acceptance build failed with exit code $LASTEXITCODE" }
@@ -100,11 +128,11 @@ finally {
     Pop-Location
 }
 
-$bundleRoot = Join-Path $appRoot 'src-tauri\target\release\bundle\nsis'
+$bundleRoot = Join-Path $oldAppRoot 'src-tauri\target\release\bundle\nsis'
 $oldInstallers = @(Get-ChildItem -LiteralPath $bundleRoot -File -Filter '*-setup.exe' |
     Where-Object { $_.Name -match ('^Beatforge_' + [regex]::Escape($OldVersion) + '_') -and $_.LastWriteTimeUtc -ge $buildStarted.AddSeconds(-5) })
 if ($oldInstallers.Count -ne 1) { throw 'Could not identify exactly one fresh old-version installer' }
-$builtExecutable = Join-Path $appRoot 'src-tauri\target\release\Beatforge.exe'
+$builtExecutable = Join-Path $oldAppRoot 'src-tauri\target\release\Beatforge.exe'
 $builtVersion = (Get-Item -LiteralPath $builtExecutable).VersionInfo.ProductVersion
 if ($builtVersion -ne $OldVersion) { throw "Built executable version is $builtVersion, expected $OldVersion" }
 if (-not [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($builtExecutable)).Contains($ManifestUrl)) {
@@ -141,6 +169,8 @@ $record = [ordered]@{
     newInstallerSha256 = (Get-FileHash -LiteralPath $newInstaller[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     originalCandidateManifest = 'original-candidate-latest.json'
     newArtifactCommit = [string]$provenance.gitCommit
+    oldSourceCommit = $oldSourceCommit
+    oldSourceMode = $oldSourceMode
     sourceCommit = (& git.exe -C $repoRoot rev-parse HEAD).Trim()
     sourceDirty = @(& git.exe -C $repoRoot status --porcelain).Count -gt 0
     result = 'pending-manual-update'

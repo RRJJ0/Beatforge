@@ -4,6 +4,8 @@
 
 此測試在一次性 Windows 帳號或 VM 使用 `https://localhost`，不需要公開主機或 GitHub Release。它會以兩個不同的 SemVer 版本，實際測試 HTTPS 下載與 updater 簽章；版控中的正式端點和內嵌公鑰都不變。測試版與正式版共用 Beatforge 的應用程式 ID 與資料位置，**絕對不要裝在日常使用的帳號**。
 
+驗收 0.1.0 → 0.2.0 時，請以 `-OldVersion 0.1.0 -OldSourceDirectory <0.1.0 正式來源 checkout>` 指定發布 0.1.0 的精確提交。工具只在隔離舊版建置中覆蓋 updater 端點，使用真正的 0.1.0 程式碼測試更新流程；產出的舊安裝檔與公開發布檔案不會逐位元相同。正式 GitHub 端點仍須在發布時另行驗證。
+
 1. 在開發機上，利用已驗證的 `0.1.0` 候選 artifact 產生測試包。工具會建置指向測試端點的 `0.0.9` 安裝檔。舊版未做 Windows Authenticode 簽章；新版候選安裝檔必須有有效的 Tauri updater 簽章。如果 `48765` 已被使用，可選其他空閒連接埠。
 
    ```powershell
