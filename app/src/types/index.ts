@@ -214,6 +214,8 @@ export interface ManagedPackage {
   installPath?: string
   errorMessage?: string
   recommended: boolean
+  acquisition: 'upstream_download' | 'manual_import'
+  sourceUrl?: string
   updatedAt: string
 }
 

@@ -121,6 +121,90 @@ pub fn install_model(
     }
 }
 
+pub fn import_model(
+    source_path: &Path,
+    models_root: &Path,
+    spec: &PackageSpec,
+) -> Result<ModelInfo, String> {
+    let source = source_path
+        .canonicalize()
+        .map_err(|error| format!("Cannot open model import folder: {error}"))?;
+    let managed_root = models_root
+        .canonicalize()
+        .map_err(|error| format!("Cannot open managed model folder: {error}"))?;
+    if !source.is_dir() || source.starts_with(&managed_root) {
+        return Err("Select an external folder containing the official model files".into());
+    }
+    for artifact in spec.artifacts() {
+        let path = source.join(&artifact.file_name);
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("Missing model file {}: {error}", artifact.file_name))?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "Model file {} must be a regular file",
+                artifact.file_name
+            ));
+        }
+    }
+    verify_model(&source, spec)?;
+
+    let package_root = models_root.join(&spec.id);
+    fs::create_dir_all(&package_root)
+        .map_err(|error| format!("Cannot create managed model folder: {error}"))?;
+    let target = package_root.join(&spec.version);
+    install_recovery::recover_interrupted_install(&package_root, &target, &spec.version)?;
+    if target.exists()
+        && let Ok(info) = verify_model(&target, spec)
+    {
+        install_recovery::clear_backups(&package_root, &spec.version)?;
+        return Ok(info);
+    }
+
+    let suffix = unique_suffix();
+    let staging = package_root.join(format!(".{}.staging-{suffix}", spec.version));
+    let backup = package_root.join(format!(".{}.backup-{suffix}", spec.version));
+    fs::create_dir(&staging)
+        .map_err(|error| format!("Cannot create model import staging folder: {error}"))?;
+    let staged = (|| {
+        for artifact in spec.artifacts() {
+            fs::copy(
+                source.join(&artifact.file_name),
+                staging.join(&artifact.file_name),
+            )
+            .map_err(|error| format!("Cannot copy model file {}: {error}", artifact.file_name))?;
+        }
+        verify_model(&staging, spec)
+    })();
+    if let Err(error) = staged {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    if target.exists() {
+        fs::rename(&target, &backup)
+            .map_err(|error| format!("Cannot preserve previous model: {error}"))?;
+    }
+    if let Err(error) = fs::rename(&staging, &target) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, &target);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!("Cannot activate imported model: {error}"));
+    }
+    match verify_model(&target, spec) {
+        Ok(info) => {
+            install_recovery::clear_backups(&package_root, &spec.version)?;
+            Ok(info)
+        }
+        Err(error) => {
+            let _ = fs::remove_dir_all(&target);
+            if backup.exists() {
+                let _ = fs::rename(&backup, &target);
+            }
+            Err(format!("Imported model failed verification: {error}"))
+        }
+    }
+}
+
 pub fn remove_model_files(
     install_path: Option<&str>,
     artifact_path: Option<&str>,
@@ -197,6 +281,7 @@ mod tests {
             },
             additional_artifacts: vec![],
             requirements: vec![],
+            acquisition: crate::packages::ModelAcquisition::UpstreamDownload,
             recommended: true,
         }
     }
@@ -220,6 +305,30 @@ mod tests {
                 .is_file()
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn manual_import_preserves_source_and_rejects_mismatched_bytes() {
+        let root = temp_directory("manual-import");
+        let source = root.join("user-download");
+        let models = root.join("models");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&models).unwrap();
+        let spec = fixture_spec(b"expected");
+        let source_file = source.join("model.safetensors");
+        fs::write(&source_file, b"wrong").unwrap();
+        assert!(import_model(&source, &models, &spec).is_err());
+        assert!(!models.join(&spec.id).join(&spec.version).exists());
+
+        fs::write(&source_file, b"expected").unwrap();
+        let installed = import_model(&source, &models, &spec).unwrap();
+        assert_eq!(fs::read(&source_file).unwrap(), b"expected");
+        assert_eq!(
+            fs::read(Path::new(&installed.path).join("model.safetensors")).unwrap(),
+            b"expected"
+        );
+        assert!(verify_model(Path::new(&installed.path), &spec).is_ok());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

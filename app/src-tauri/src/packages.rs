@@ -5,9 +5,122 @@ use std::collections::HashSet;
 pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub const PYTHON_RUNTIME_ID: &str = "python-3.10-windows-x64";
 pub const STANDARD_MODEL_ID: &str = "mapperatorinator-v32-standard";
+const MODEL_CATALOG_LOCK: &str =
+    include_str!("../resources/manifests/mapperatorinator-model-catalog.lock.json");
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelCatalogLock {
+    models: Vec<CatalogModel>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogModel {
+    id: String,
+    name: String,
+    repository: String,
+    revision: String,
+    model_subdirectory: String,
+    files: Vec<CatalogFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogFile {
+    path: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+fn additional_models() -> Vec<PackageSpec> {
+    let catalog: ModelCatalogLock =
+        serde_json::from_str(MODEL_CATALOG_LOCK).expect("valid built-in model catalog lock");
+    let mut result = Vec::new();
+    for model in catalog.models {
+        if model.id == STANDARD_MODEL_ID {
+            continue;
+        }
+        let acquisition = match model.id.as_str() {
+            "mapperatorinator-v30-standard" | "mapperatorinator-v31-standard" => {
+                ModelAcquisition::ManualImport
+            }
+            "mapperatorinator-v32-mini-standard" => ModelAcquisition::UpstreamDownload,
+            _ => panic!("unexpected built-in model ID"),
+        };
+        assert!(
+            model
+                .repository
+                .starts_with("https://huggingface.co/OliBomby/Mapperatorinator-v")
+        );
+        assert!(
+            model.revision.len() == 40 && model.revision.bytes().all(|b| b.is_ascii_hexdigit())
+        );
+        let suffix = model
+            .id
+            .strip_prefix("mapperatorinator-v")
+            .unwrap()
+            .strip_suffix("-standard")
+            .unwrap();
+        let version = format!("{suffix}.{}", &model.revision[..8]);
+        let mut artifacts: Vec<PackageArtifact> = model
+            .files
+            .into_iter()
+            .map(|file| {
+                let file_name = file
+                    .path
+                    .strip_prefix(&format!("{}/", model.model_subdirectory))
+                    .unwrap_or(&file.path)
+                    .to_string();
+                assert!(!file_name.contains(['/', '\\']));
+                PackageArtifact {
+                    url: format!(
+                        "{}/resolve/{}/{}",
+                        model.repository,
+                        model.revision,
+                        file.path.replace('=', "%3D")
+                    ),
+                    size_bytes: file.size_bytes,
+                    sha256: file.sha256,
+                    file_name,
+                }
+            })
+            .collect();
+        let weight = artifacts
+            .iter()
+            .position(|artifact| artifact.file_name == "model.safetensors")
+            .expect("catalog model weight");
+        let artifact = artifacts.remove(weight);
+        assert_eq!(artifacts.len(), 3);
+        result.push(PackageSpec {
+            id: model.id,
+            kind: PackageKind::Model,
+            name: format!("{} — osu!standard", model.name),
+            description: match acquisition {
+                ModelAcquisition::ManualImport => {
+                    "Import the exact official model files downloaded in your browser".into()
+                }
+                ModelAcquisition::UpstreamDownload => {
+                    "Official checkpoint for generating osu!standard beatmaps".into()
+                }
+            },
+            version,
+            artifact,
+            additional_artifacts: artifacts,
+            requirements: vec![PackageRequirement {
+                package_id: PYTHON_RUNTIME_ID.into(),
+                version: "3.10.21".into(),
+            }],
+            acquisition,
+            recommended: false,
+        });
+    }
+    assert_eq!(result.len(), 3);
+    result
+}
 
 pub fn builtin_manifest() -> PackageManifest {
-    PackageManifest {
+    let mut manifest = PackageManifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
         packages: vec![
             PackageSpec {
@@ -24,6 +137,7 @@ pub fn builtin_manifest() -> PackageManifest {
                 },
                 additional_artifacts: vec![],
                 requirements: vec![],
+                acquisition: ModelAcquisition::UpstreamDownload,
                 recommended: true,
             },
             PackageSpec {
@@ -62,10 +176,21 @@ pub fn builtin_manifest() -> PackageManifest {
                     package_id: PYTHON_RUNTIME_ID.into(),
                     version: "3.10.21".into(),
                 }],
+                acquisition: ModelAcquisition::UpstreamDownload,
                 recommended: true,
             },
         ],
-    }
+    };
+    manifest.packages.extend(additional_models());
+    manifest
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAcquisition {
+    #[default]
+    UpstreamDownload,
+    ManualImport,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,7 +260,7 @@ impl PackageStatus {
         use PackageStatus::*;
         matches!(
             (self, next),
-            (NotInstalled | Failed | UpdateAvailable, Queued)
+            (NotInstalled | Failed | UpdateAvailable, Queued | Installing)
                 | (Queued, Downloading | Failed | NotInstalled)
                 | (Downloading, Verifying | Failed | NotInstalled)
                 | (Verifying, Downloaded | Failed | NotInstalled)
@@ -178,6 +303,8 @@ pub struct PackageSpec {
     pub additional_artifacts: Vec<PackageArtifact>,
     #[serde(default)]
     pub requirements: Vec<PackageRequirement>,
+    #[serde(default)]
+    pub acquisition: ModelAcquisition,
     #[serde(default)]
     pub recommended: bool,
 }
@@ -316,6 +443,8 @@ pub struct ManagedPackage {
     pub install_path: Option<String>,
     pub error_message: Option<String>,
     pub recommended: bool,
+    pub acquisition: ModelAcquisition,
+    pub source_url: Option<String>,
     pub updated_at: String,
 }
 
@@ -432,6 +561,21 @@ pub fn sync_manifest(connection: &Connection, manifest: &PackageManifest) -> Res
 fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ManagedPackage> {
     let kind: String = row.get(1)?;
     let status: String = row.get(6)?;
+    let manifest_json: String = row.get(15)?;
+    let spec: PackageSpec =
+        serde_json::from_str(&manifest_json).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let source_url = if spec.kind == PackageKind::Model {
+        spec.artifact
+            .url
+            .split_once("/resolve/")
+            .and_then(|(repository, rest)| {
+                rest.split('/')
+                    .next()
+                    .map(|revision| format!("{repository}/tree/{revision}"))
+            })
+    } else {
+        None
+    };
     Ok(ManagedPackage {
         id: row.get(0)?,
         kind: match kind.as_str() {
@@ -452,12 +596,14 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ManagedPackage> {
         error_message: row.get(12)?,
         recommended: row.get(13)?,
         updated_at: row.get(14)?,
+        acquisition: spec.acquisition,
+        source_url,
     })
 }
 
 const SELECT_PACKAGE: &str = "SELECT package_id, kind, name, description, target_version,
   installed_version, status, progress, bytes_downloaded, size_bytes, artifact_path, install_path,
-  error_message, recommended, updated_at FROM package_installations";
+  error_message, recommended, updated_at, manifest_json FROM package_installations";
 
 pub fn list(connection: &Connection) -> Result<Vec<ManagedPackage>, String> {
     let mut statement = connection
@@ -611,6 +757,7 @@ mod tests {
             },
             additional_artifacts: vec![],
             requirements: vec![],
+            acquisition: ModelAcquisition::UpstreamDownload,
             recommended: true,
         }
     }
@@ -626,6 +773,35 @@ mod tests {
     fn builtin_manifest_contains_pinned_standard_model() {
         let manifest = builtin_manifest();
         manifest.validate().unwrap();
+        assert_eq!(
+            manifest
+                .packages
+                .iter()
+                .filter(|package| package.kind == PackageKind::Model)
+                .count(),
+            4
+        );
+        for id in [
+            "mapperatorinator-v30-standard",
+            "mapperatorinator-v31-standard",
+        ] {
+            let package = manifest
+                .packages
+                .iter()
+                .find(|package| package.id == id)
+                .unwrap();
+            assert_eq!(package.acquisition, ModelAcquisition::ManualImport);
+            assert_eq!(package.artifacts().count(), 4);
+        }
+        assert_eq!(
+            manifest
+                .packages
+                .iter()
+                .find(|package| package.id == "mapperatorinator-v32-mini-standard")
+                .unwrap()
+                .acquisition,
+            ModelAcquisition::UpstreamDownload
+        );
         let model = manifest
             .packages
             .iter()
@@ -730,6 +906,59 @@ mod tests {
         assert_eq!(saved.status, PackageStatus::UpdateAvailable);
         assert_eq!(saved.installed_version.as_deref(), Some("1.0.0"));
         assert_eq!(saved.target_version, "1.1.0");
+    }
+
+    #[test]
+    fn adding_models_preserves_an_existing_v32_installation() {
+        let connection = database();
+        let full = builtin_manifest();
+        let existing = PackageManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            packages: full
+                .packages
+                .iter()
+                .filter(|package| {
+                    package.id == PYTHON_RUNTIME_ID || package.id == STANDARD_MODEL_ID
+                })
+                .cloned()
+                .collect(),
+        };
+        sync_manifest(&connection, &existing).unwrap();
+        for status in [
+            PackageStatus::Queued,
+            PackageStatus::Downloading,
+            PackageStatus::Verifying,
+            PackageStatus::Downloaded,
+            PackageStatus::Installing,
+        ] {
+            transition(
+                &connection,
+                STANDARD_MODEL_ID,
+                status,
+                100,
+                870_521_594,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        transition(
+            &connection,
+            STANDARD_MODEL_ID,
+            PackageStatus::Installed,
+            100,
+            870_521_594,
+            Some("32.74f22583"),
+            Some("C:\\models\\v32"),
+            None,
+        )
+        .unwrap();
+        sync_manifest(&connection, &full).unwrap();
+        let v32 = get(&connection, STANDARD_MODEL_ID).unwrap().unwrap();
+        assert_eq!(v32.status, PackageStatus::Installed);
+        assert_eq!(v32.install_path.as_deref(), Some("C:\\models\\v32"));
+        assert_eq!(list(&connection).unwrap().len(), 5);
     }
 
     #[test]

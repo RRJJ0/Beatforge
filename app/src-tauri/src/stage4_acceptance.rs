@@ -52,6 +52,7 @@ fn model_spec(version: &str, data: &[u8]) -> PackageSpec {
         artifact: artifact(data),
         additional_artifacts: vec![],
         requirements: vec![],
+        acquisition: packages::ModelAcquisition::UpstreamDownload,
         recommended: true,
     }
 }

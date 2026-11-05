@@ -1180,6 +1180,13 @@ async fn download_managed_package(
 ) -> Result<packages::ManagedPackage, String> {
     let (connection, paths) = open_database(&app)?;
     let spec = packages::get_spec(&connection, &package_id)?;
+    if spec.kind == packages::PackageKind::Model
+        && spec.acquisition == packages::ModelAcquisition::ManualImport
+    {
+        return Err(
+            "This model requires manual import; Beatforge does not download its weights".into(),
+        );
+    }
     let current = packages::get(&connection, &package_id)?
         .ok_or_else(|| format!("Unknown package: {package_id}"))?;
     packages::transition(
@@ -1558,6 +1565,9 @@ async fn install_model_package(
     if spec.kind != packages::PackageKind::Model {
         return Err("The selected package is not a model".into());
     }
+    if spec.acquisition == packages::ModelAcquisition::ManualImport {
+        return Err("This model requires manual import".into());
+    }
     ensure_package_requirements(&connection, &spec)?;
     let current = packages::get(&connection, &package_id)?
         .ok_or_else(|| format!("Unknown package: {package_id}"))?;
@@ -1657,6 +1667,101 @@ async fn install_model_package(
     }
     packages::get(&connection, &package_id)?
         .ok_or_else(|| "Installed model could not be loaded".to_string())
+}
+
+#[tauri::command]
+async fn import_model_package(
+    app: AppHandle,
+    package_id: String,
+    source_path: String,
+) -> Result<packages::ManagedPackage, String> {
+    let (connection, paths) = open_database(&app)?;
+    let spec = packages::get_spec(&connection, &package_id)?;
+    if spec.kind != packages::PackageKind::Model
+        || spec.acquisition != packages::ModelAcquisition::ManualImport
+    {
+        return Err("The selected package does not allow manual import".into());
+    }
+    ensure_package_requirements(&connection, &spec)?;
+    let current = packages::get(&connection, &package_id)?
+        .ok_or_else(|| format!("Unknown package: {package_id}"))?;
+    if current.status == packages::PackageStatus::Installed {
+        let path = current
+            .install_path
+            .as_deref()
+            .ok_or_else(|| "Installed model has no install path".to_string())?;
+        if models::verify_model(Path::new(path), &spec).is_ok() {
+            return Ok(current);
+        }
+        packages::transition(
+            &connection,
+            &package_id,
+            packages::PackageStatus::Failed,
+            current.progress,
+            current.bytes_downloaded,
+            None,
+            None,
+            Some("Installed model failed checksum verification"),
+        )?;
+    }
+    packages::transition(
+        &connection,
+        &package_id,
+        packages::PackageStatus::Installing,
+        0,
+        0,
+        None,
+        None,
+        None,
+    )?;
+    drop(connection);
+
+    let models_root = PathBuf::from(&paths.models);
+    let source = PathBuf::from(source_path);
+    let version = spec.version.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        models::import_model(&source, &models_root, &spec)
+    })
+    .await
+    .map_err(|error| format!("Model import task failed: {error}"))?;
+    let connection = Connection::open(&paths.database).map_err(|error| error.to_string())?;
+    match result {
+        Ok(info) => {
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Installed,
+                100,
+                info.size_bytes,
+                Some(&version),
+                Some(&info.path),
+                None,
+            )?;
+            if current.install_path.as_deref() != Some(info.path.as_str()) {
+                let _ = models::remove_model_files(
+                    current.install_path.as_deref(),
+                    None,
+                    Path::new(&paths.models),
+                    Path::new(&paths.cache),
+                );
+            }
+        }
+        Err(error) => {
+            packages::transition(
+                &connection,
+                &package_id,
+                packages::PackageStatus::Failed,
+                0,
+                0,
+                None,
+                None,
+                Some(&error),
+            )?;
+            return Err(error);
+        }
+    }
+    packages::get(&connection, &package_id)?
+        .ok_or_else(|| "Imported model could not be loaded".to_string())
 }
 
 #[tauri::command]
@@ -2003,6 +2108,7 @@ pub fn run() {
             diagnose_production_worker,
             install_ai_dependencies,
             install_model_package,
+            import_model_package,
             verify_model_package,
             remove_model_package,
             cancel_job,

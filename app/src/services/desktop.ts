@@ -208,6 +208,10 @@ export async function installModelPackage(packageId: string) {
   return invoke<ManagedPackage>('install_model_package', { packageId })
 }
 
+export async function importModelPackage(packageId: string, sourcePath: string) {
+  return invoke<ManagedPackage>('import_model_package', { packageId, sourcePath })
+}
+
 export async function verifyModelPackage(packageId: string) {
   return invoke<ModelInfo>('verify_model_package', { packageId })
 }

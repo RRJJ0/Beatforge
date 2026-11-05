@@ -4,6 +4,7 @@ import {
   downloadManagedPackage,
   installPythonRuntime,
   installModelPackage,
+  importModelPackage,
   isDesktopRuntime,
   listManagedPackages,
   onPackageProgressEvent,
@@ -113,6 +114,17 @@ export const usePackagesStore = defineStore('packages', () => {
     }
   }
 
+  async function importModel(packageId: string, sourcePath: string) {
+    error.value = ''
+    try {
+      replace(await importModelPackage(packageId, sourcePath))
+    } catch (reason) {
+      error.value = reason instanceof Error ? reason.message : String(reason)
+      await refresh()
+      throw reason
+    }
+  }
+
   async function verifyModel(packageId: string) {
     error.value = ''
     try {
@@ -149,6 +161,7 @@ export const usePackagesStore = defineStore('packages', () => {
     verifyRuntime,
     removeRuntime,
     installModel,
+    importModel,
     verifyModel,
     removeModel,
   }

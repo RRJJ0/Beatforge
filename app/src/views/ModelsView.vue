@@ -9,6 +9,7 @@ import {
 } from '@vicons/ionicons5'
 import type { ComputeBackend, ManagedPackage } from '@/types'
 import { usePackagesStore } from '@/stores/packages'
+import { selectDirectory } from '@/services/desktop'
 import { useEnvironmentStore } from '@/stores/environment'
 import { useI18n } from '@/i18n'
 
@@ -65,9 +66,30 @@ function modelBusy(model: ManagedPackage) {
 async function installModel(model: ManagedPackage) {
   try {
     await packageStore.installModel(model.id)
-    message.success(`${model.name} is ready.`)
+    message.success(t('models.packageVerified', { name: model.name }))
   } catch {
     message.error(packageStore.error || `${model.name} installation failed.`)
+  }
+}
+
+async function importModel(model: ManagedPackage) {
+  const source = await selectDirectory()
+  if (!source) return
+  try {
+    await packageStore.importModel(model.id, source)
+    message.success(t('models.importReady', { name: model.name }))
+  } catch {
+    message.error(packageStore.error || t('models.importFailed'))
+  }
+}
+
+async function copyModelSource(model: ManagedPackage) {
+  if (!model.sourceUrl) return
+  try {
+    await navigator.clipboard.writeText(model.sourceUrl)
+    message.success(t('models.sourceCopied'))
+  } catch {
+    message.error(t('models.sourceCopyFailed'))
   }
 }
 
@@ -392,6 +414,12 @@ onMounted(async () => {
             ><NTag size="small" round>v{{ model.targetVersion }}</NTag>
           </div>
           <p>{{ model.description }}</p>
+          <NAlert v-if="model.id !== 'mapperatorinator-v32-standard'" type="warning" class="import-guidance">
+            {{ t('models.generationPending') }}
+          </NAlert>
+          <NAlert v-if="model.acquisition === 'manual_import'" type="info" class="import-guidance">
+            {{ t('models.manualImportHelp') }}
+          </NAlert>
           <div class="model-meta">
             <span>{{ formatBytes(model.sizeBytes) }}</span
             ><span>osu!standard</span><span>{{ t('models.official') }}</span>
@@ -403,6 +431,11 @@ onMounted(async () => {
           </div>
         </div>
         <div class="model-action">
+          <NButton
+            v-if="model.acquisition === 'manual_import' && model.sourceUrl"
+            secondary
+            @click="copyModelSource(model)"
+          >{{ t('models.copySourceUrl') }}</NButton>
           <NTag v-if="model.status === 'installed'" type="success" :bordered="false"
             ><template #icon><NIcon :component="CheckmarkCircleOutline" /></template>{{ t('models.installed') }}</NTag
           >
@@ -412,9 +445,9 @@ onMounted(async () => {
             secondary
             :loading="modelBusy(model)"
             :disabled="modelBusy(model) || runtime?.status !== 'installed'"
-            @click="installModel(model)"
+            @click="model.acquisition === 'manual_import' ? importModel(model) : installModel(model)"
             ><template #icon><NIcon :component="CloudDownloadOutline" /></template>
-            {{ model.status === 'update_available' ? t('models.update') : model.status === 'failed' ? t('models.repair') : t('common.install') }}
+            {{ model.acquisition === 'manual_import' ? t('models.importFolder') : model.status === 'update_available' ? t('models.update') : model.status === 'failed' ? t('models.repair') : t('common.install') }}
           </NButton
           >
           <NButton
