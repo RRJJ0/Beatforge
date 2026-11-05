@@ -7,6 +7,9 @@ The original planning-heavy README is preserved as the
 An [English milestone overview](roadmap.md) provides a shorter companion.
 These are historical development records, not end-user feature promises.
 
+For current planning, see the [0.2.0 development plan draft](v0.2.0-plan.md) and
+[field contract](v0.2.0-field-contract.md).
+
 ## Source and architecture
 
 - `app/src/`: Vue UI, stores, desktop services, and localization.

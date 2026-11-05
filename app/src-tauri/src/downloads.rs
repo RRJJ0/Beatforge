@@ -297,7 +297,7 @@ mod tests {
         net::TcpListener,
         sync::mpsc,
         thread,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Instant, SystemTime, UNIX_EPOCH},
     };
 
     fn temp_directory(name: &str) -> PathBuf {
@@ -320,11 +320,25 @@ mod tests {
 
     fn server(data: Vec<u8>) -> (String, mpsc::Receiver<Option<u64>>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let (sender, receiver) = mpsc::channel();
         let handle = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
             let (mut stream, range_start) = loop {
-                let (mut stream, _) = listener.accept().unwrap();
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "local fixture server received no request"
+                        );
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("local fixture server accept failed: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
                 let mut request_line = String::new();
                 let mut range_start = None;
                 {

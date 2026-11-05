@@ -765,7 +765,7 @@ async function performStorageCleanup() {
           </NButton>
           <NButton v-else size="small" secondary @click="testNotification">Send test</NButton>
         </div>
-        <div class="app-version"><span>Beatforge Desktop</span><strong>0.1.0-alpha</strong></div>
+        <div class="app-version"><span>Beatforge Desktop</span><strong>0.2.0</strong></div>
       </NCard>
       <NCard class="panel-card" :bordered="false">
         <div class="card-heading">

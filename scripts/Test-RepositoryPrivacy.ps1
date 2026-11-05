@@ -54,6 +54,7 @@ try {
     # Only these manually reviewed, redacted documentation screenshots are public.
     # Pin their Git blob IDs so replacing a screenshot requires another review.
     $allowedScreenshots = @{
+        'docs/ui/exports/16-generate-v020.png' = 'f9d823b8c3d5454d02961223ffab2a3788c423e3'
         'docs/demoImage/generate.png' = '22799c6cfd713afc7274fee2e539ffc7661d9342'
         'docs/demoImage/history.png' = '66dc851bd865ed4850cbd238fbd2e940480cd684'
         'docs/demoImage/jobs.png' = 'f8cea9d381d8a753699b29a96c8c292bd0e74f05'
@@ -78,7 +79,7 @@ try {
     }
 
     if ($violations.Count -gt 0) {
-        $summary = $violations | Sort-Object -Unique
+        $summary = @($violations | Sort-Object -Unique)
         throw "Repository privacy scan found $($summary.Count) issue(s):`n$($summary -join "`n")"
     }
     Write-Host "Repository privacy scan passed: $($revisions.Count) revisions; only reviewed documentation screenshots are allowlisted media." -ForegroundColor Green

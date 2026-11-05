@@ -41,8 +41,14 @@ fn database() -> Connection {
 
 fn input(audio: &Path) -> StartJobInput {
     StartJobInput {
+        request_schema_version: 1,
         title: "Stage 9 Acceptance".into(),
         artist: "Beatforge".into(),
+        creator: None,
+        title_unicode: None,
+        artist_unicode: None,
+        source: None,
+        tags: vec![],
         audio_file: audio.to_string_lossy().into_owned(),
         model: crate::packages::STANDARD_MODEL_ID.into(),
         difficulty: 3.5,
@@ -56,6 +62,10 @@ fn input(audio: &Path) -> StartJobInput {
                 negative_descriptors: vec![],
                 approach_rate: Some(8.0),
                 circle_size: Some(4.0),
+                hp_drain_rate: None,
+                overall_difficulty: None,
+                slider_multiplier: None,
+                slider_tick_rate: None,
                 hitsounded: true,
             },
             DifficultyRequest {
@@ -67,6 +77,10 @@ fn input(audio: &Path) -> StartJobInput {
                 negative_descriptors: vec![],
                 approach_rate: Some(9.2),
                 circle_size: Some(4.2),
+                hp_drain_rate: None,
+                overall_difficulty: None,
+                slider_multiplier: None,
+                slider_tick_rate: None,
                 hitsounded: true,
             },
         ],
@@ -222,6 +236,10 @@ fn restart_and_retry_reconcile_sqlite_without_reusing_an_output() {
         assert!(retried.output_path.is_none());
         assert!(retried.validation_report.is_none());
         assert!(retried.provenance.is_none());
+        let stored = jobs::get_input(&connection, id).unwrap().unwrap();
+        assert_eq!(stored.difficulties[0].seed, 10);
+        assert_eq!(stored.difficulties[1].seed, 20);
+        assert_eq!(stored.difficulties[1].approach_rate, Some(9.2));
     }
     assert_eq!(jobs::active_ids(&connection).unwrap().len(), 2);
     fs::remove_dir_all(root).unwrap();

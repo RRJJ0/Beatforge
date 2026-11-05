@@ -6,7 +6,12 @@ The source of truth for the first desktop wireframe is:
 
 - `osu-ai-desktop-wireframes.drawio`
 
-The file contains 14 pages covering information architecture, first-run setup, generation, job states, results, history, models, settings, dialogs, notifications, and the component reference.
+The file contains 15 pages covering information architecture, first-run setup, generation, job states, results, history, models, settings, dialogs, notifications, and the component reference.
+
+The approved 0.2.0 Generate wireframe has a separate [editable draw.io file](beatforge-v020-generate.drawio)
+and [PNG preview](exports/16-generate-v020.png) or
+[SVG vector version](exports/16-generate-v020.svg). Values shown are layout examples;
+defaults and valid ranges follow the [field contract](../development/v0.2.0-field-contract.md).
 
 ## Visual direction
 

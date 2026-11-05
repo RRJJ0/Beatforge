@@ -362,8 +362,14 @@ mod tests {
         migrate(&connection).expect("migration succeeds");
         migrate(&connection).expect("migration is idempotent");
         let input = StartJobInput {
+            request_schema_version: 1,
             title: "Test Track".into(),
             artist: "Test Artist".into(),
+            creator: None,
+            title_unicode: None,
+            artist_unicode: None,
+            source: None,
+            tags: vec![],
             audio_file: "C:\\Music\\test.mp3".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 4.5,
@@ -402,6 +408,57 @@ mod tests {
     }
 
     #[test]
+    fn stores_v020_request_for_retry_and_reads_legacy_defaults() {
+        let connection = version_one_database();
+        migrate(&connection).unwrap();
+        let input: StartJobInput = serde_json::from_value(serde_json::json!({
+            "requestSchemaVersion": 2,
+            "title": "Song", "artist": "Artist", "creator": "Human Mapper",
+            "titleUnicode": "原文", "source": "Game", "tags": ["electronic"],
+            "audioFile": "song.wav", "model": crate::packages::STANDARD_MODEL_ID,
+            "difficulty": 4.8,
+            "difficulties": [{
+                "id": "normal", "name": "Normal", "difficulty": 4.8, "seed": 7,
+                "hpDrainRate": 6, "overallDifficulty": 8.5,
+                "sliderMultiplier": 1.6, "sliderTickRate": 2
+            }]
+        }))
+        .unwrap();
+        insert(&connection, "BF-V020", &input).unwrap();
+        let saved = get_input(&connection, "BF-V020").unwrap().unwrap();
+        assert_eq!(saved.creator.as_deref(), Some("Human Mapper"));
+        assert_eq!(saved.difficulties[0].slider_multiplier, Some(1.6));
+        assert_eq!(saved.difficulties[0].hp_drain_rate, Some(6.0));
+
+        let legacy: StartJobInput = serde_json::from_value(serde_json::json!({
+            "title": "Old", "artist": "Artist", "audioFile": "song.wav",
+            "model": crate::packages::STANDARD_MODEL_ID, "difficulty": 4.8
+        }))
+        .unwrap();
+        assert_eq!(legacy.request_schema_version, 1);
+        assert!(legacy.creator.is_none());
+        assert!(legacy.tags.is_empty());
+
+        let legacy_json = serde_json::json!({
+            "title": "Old", "artist": "Artist", "audioFile": "song.wav",
+            "model": crate::packages::STANDARD_MODEL_ID, "difficulty": 4.8
+        })
+        .to_string();
+        connection
+            .execute(
+                "INSERT INTO jobs(id, status, request_json) VALUES (?1, 'interrupted', ?2)",
+                params!["BF-OLD", legacy_json],
+            )
+            .unwrap();
+        reset_for_retry(&connection, "BF-OLD").unwrap();
+        let restored = get_input(&connection, "BF-OLD").unwrap().unwrap();
+        assert_eq!(restored.request_schema_version, 1);
+        assert_eq!(restored.title, "Old");
+        assert!(restored.creator.is_none());
+        assert!(restored.tags.is_empty());
+    }
+
+    #[test]
     fn repairs_validation_column_when_shared_version_three_is_already_marked() {
         let connection = version_one_database();
         connection
@@ -422,8 +479,14 @@ mod tests {
         let connection = version_one_database();
         migrate(&connection).expect("migration succeeds");
         let input = StartJobInput {
+            request_schema_version: 1,
             title: "Test".into(),
             artist: "Artist".into(),
+            creator: None,
+            title_unicode: None,
+            artist_unicode: None,
+            source: None,
+            tags: vec![],
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 3.0,
@@ -463,8 +526,14 @@ mod tests {
         let connection = version_one_database();
         migrate(&connection).expect("migration succeeds");
         let input = StartJobInput {
+            request_schema_version: 1,
             title: "Test".into(),
             artist: "Artist".into(),
+            creator: None,
+            title_unicode: None,
+            artist_unicode: None,
+            source: None,
+            tags: vec![],
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 3.0,
@@ -524,8 +593,14 @@ mod tests {
         let connection = version_one_database();
         migrate(&connection).unwrap();
         let input = StartJobInput {
+            request_schema_version: 1,
             title: "Artifact state".into(),
             artist: "Artist".into(),
+            creator: None,
+            title_unicode: None,
+            artist_unicode: None,
+            source: None,
+            tags: vec![],
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 4.0,
@@ -588,8 +663,14 @@ mod tests {
         let connection = version_one_database();
         migrate(&connection).expect("migration succeeds");
         let input = StartJobInput {
+            request_schema_version: 1,
             title: "Source Track".into(),
             artist: "Source Artist".into(),
+            creator: None,
+            title_unicode: None,
+            artist_unicode: None,
+            source: None,
+            tags: vec![],
             audio_file: "C:\\Music\\source.flac".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
             difficulty: 5.5,

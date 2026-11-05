@@ -37,6 +37,7 @@ import {
   selectVideoFile,
 } from '@/services/desktop'
 import { useI18n } from '@/i18n'
+import { publicTags, validNumber, validTags, validText } from '@/utils/generateDraft'
 
 const router = useRouter()
 const message = useMessage()
@@ -45,6 +46,11 @@ const { t } = useI18n()
 const audioFile = ref('')
 const title = ref('')
 const artist = ref('')
+const creator = ref('')
+const titleUnicode = ref('')
+const artistUnicode = ref('')
+const songSource = ref('')
+const tags = ref<string[]>([])
 const model = ref('mapperatorinator-v32-standard')
 const isAdvanced = ref(false)
 const attempted = ref(false)
@@ -71,6 +77,10 @@ interface EditableDifficulty {
   negativeDescriptors: string[]
   approachRate: number
   circleSize: number
+  hpDrainRate: number | null
+  overallDifficulty: number | null
+  sliderMultiplier: number | null
+  sliderTickRate: number | null
   hitsounded: boolean
 }
 
@@ -79,13 +89,17 @@ function makeDifficulty(rating = 4.8): EditableDifficulty {
   const id = nextDifficultyId++
   return {
     id: `difficulty-${id}`,
-    name: `AI ${rating.toFixed(1)}★`,
+    name: `AI ${rating.toFixed(1)}s`,
     difficulty: rating,
     seed: Math.floor(Math.random() * 65_536),
     descriptors: [],
     negativeDescriptors: [],
     approachRate: 9,
     circleSize: 4,
+    hpDrainRate: null,
+    overallDifficulty: null,
+    sliderMultiplier: null,
+    sliderTickRate: null,
     hitsounded: true,
   }
 }
@@ -108,11 +122,28 @@ const scenarioOptions = [
   { label: 'Simulate unexpected process exit', value: 'crash' },
   { label: 'Simulate malformed protocol message', value: 'malformed' },
 ]
+const validPublicTags = computed(() => validTags(tags.value))
+const validV020 = computed(
+  () =>
+    [creator.value, titleUnicode.value, artistUnicode.value, songSource.value].every((value) =>
+      validText(value),
+    ) &&
+    validPublicTags.value &&
+    difficulties.value.every(
+      (item) =>
+        validNumber(item.hpDrainRate, 0, 10) &&
+        validNumber(item.overallDifficulty, 0, 10) &&
+        validNumber(item.sliderMultiplier, 0.1, 10) &&
+        validNumber(item.sliderTickRate, 0.1, 10),
+    ),
+)
+const effectivePublicTags = computed(() => publicTags(tags.value))
 const canGenerate = computed(() =>
   Boolean(
     audioFile.value &&
-    title.value.trim() &&
-    artist.value.trim() &&
+    validText(title.value, true) &&
+    validText(artist.value, true) &&
+    validV020.value &&
     difficulties.value.length > 0 &&
     difficulties.value.every((item) => item.name.trim()) &&
     new Set(difficulties.value.map((item) => item.name.trim().toLocaleLowerCase())).size ===
@@ -206,6 +237,21 @@ function clearVideo() {
 
 async function createJob() {
   attempted.value = true
+  if (!validV020.value) {
+    if (
+      difficulties.value.some(
+        (item) =>
+          !validNumber(item.hpDrainRate, 0, 10) ||
+          !validNumber(item.overallDifficulty, 0, 10) ||
+          !validNumber(item.sliderMultiplier, 0.1, 10) ||
+          !validNumber(item.sliderTickRate, 0.1, 10),
+      )
+    ) {
+      isAdvanced.value = true
+    }
+    message.warning(t('generate.invalidFields'))
+    return
+  }
   if (!canGenerate.value) {
     message.warning(t('generate.missing'))
     return
@@ -214,8 +260,14 @@ async function createJob() {
   try {
     const primary = difficulties.value[0]!
     await jobsStore.createJob({
+      requestSchemaVersion: 2,
       title: title.value.trim(),
       artist: artist.value.trim(),
+      creator: creator.value.trim() || null,
+      titleUnicode: titleUnicode.value.trim() || null,
+      artistUnicode: artistUnicode.value.trim() || null,
+      source: songSource.value.trim() || null,
+      tags: tags.value.map((tag) => tag.trim()),
       audioFile: audioFile.value,
       model: model.value,
       difficulty: primary.difficulty,
@@ -282,23 +334,89 @@ async function createJob() {
             <NFormItem
               :label="t('generate.title')"
               required
-              :validation-status="attempted && !title.trim() ? 'error' : undefined"
-              :feedback="attempted && !title.trim() ? t('generate.enterTitle') : undefined"
+              :validation-status="attempted && !validText(title, true) ? 'error' : undefined"
+              :feedback="
+                attempted && !validText(title, true) ? t('generate.enterTitle') : undefined
+              "
             >
               <NInput v-model:value="title" :placeholder="t('generate.songTitle')" />
             </NFormItem>
             <NFormItem
               :label="t('generate.artist')"
               required
-              :validation-status="attempted && !artist.trim() ? 'error' : undefined"
-              :feedback="attempted && !artist.trim() ? t('generate.enterArtist') : undefined"
+              :validation-status="attempted && !validText(artist, true) ? 'error' : undefined"
+              :feedback="
+                attempted && !validText(artist, true) ? t('generate.enterArtist') : undefined
+              "
             >
               <NInput v-model:value="artist" :placeholder="t('generate.artistName')" />
             </NFormItem>
           </div>
-          <NFormItem :label="t('generate.creator')"
-            ><NInput value="Beatforge AI" disabled
-          /></NFormItem>
+          <div class="two-column">
+            <NFormItem
+              :label="t('generate.creator')"
+              :validation-status="attempted && !validText(creator) ? 'error' : undefined"
+              :feedback="attempted && !validText(creator) ? t('generate.textInvalid') : undefined"
+            >
+              <NInput
+                v-model:value="creator"
+                :placeholder="t('generate.creatorDefault')"
+                maxlength="200"
+              />
+            </NFormItem>
+            <NFormItem
+              :label="t('generate.songSource')"
+              :validation-status="attempted && !validText(songSource) ? 'error' : undefined"
+              :feedback="
+                attempted && !validText(songSource) ? t('generate.textInvalid') : undefined
+              "
+            >
+              <NInput
+                v-model:value="songSource"
+                :placeholder="t('generate.optional')"
+                maxlength="200"
+              />
+            </NFormItem>
+          </div>
+          <NAlert class="metadata-note" type="warning" :show-icon="false">{{
+            t('generate.creatorDisclosure')
+          }}</NAlert>
+          <div class="two-column">
+            <NFormItem
+              :label="t('generate.titleUnicode')"
+              :validation-status="attempted && !validText(titleUnicode) ? 'error' : undefined"
+              :feedback="
+                attempted && !validText(titleUnicode) ? t('generate.textInvalid') : undefined
+              "
+            >
+              <NInput
+                v-model:value="titleUnicode"
+                :placeholder="t('generate.sameAsTitle')"
+                maxlength="200"
+              />
+            </NFormItem>
+            <NFormItem
+              :label="t('generate.artistUnicode')"
+              :validation-status="attempted && !validText(artistUnicode) ? 'error' : undefined"
+              :feedback="
+                attempted && !validText(artistUnicode) ? t('generate.textInvalid') : undefined
+              "
+            >
+              <NInput
+                v-model:value="artistUnicode"
+                :placeholder="t('generate.sameAsArtist')"
+                maxlength="200"
+              />
+            </NFormItem>
+          </div>
+          <NFormItem
+            :label="t('generate.publicTags')"
+            :validation-status="attempted && !validPublicTags ? 'error' : undefined"
+            :feedback="attempted && !validPublicTags ? t('generate.tagsInvalid') : undefined"
+          >
+            <NDynamicTags v-model:value="tags" />
+          </NFormItem>
+          <p class="field-help">{{ t('generate.tagsHelp') }}</p>
         </NForm>
       </div>
 
@@ -473,7 +591,7 @@ async function createJob() {
               <NFormItem :label="t('generate.descriptors')"
                 ><NDynamicTags v-model:value="selectedDifficulty.descriptors"
               /></NFormItem>
-              <NFormItem :label="t('generate.negative')"
+              <NFormItem :label="t('generate.negative')" :feedback="t('generate.negativeHelp')"
                 ><NDynamicTags v-model:value="selectedDifficulty.negativeDescriptors"
               /></NFormItem>
             </div>
@@ -521,6 +639,94 @@ async function createJob() {
                     :max="10"
                     :step="0.1"
                 /></NFormItem>
+                <NFormItem
+                  :label="t('generate.hp')"
+                  :validation-status="
+                    attempted && !validNumber(selectedDifficulty.hpDrainRate, 0, 10)
+                      ? 'error'
+                      : undefined
+                  "
+                  :feedback="
+                    attempted && !validNumber(selectedDifficulty.hpDrainRate, 0, 10)
+                      ? t('generate.numberInvalid', { min: 0, max: 10 })
+                      : undefined
+                  "
+                >
+                  <NInputNumber
+                    v-model:value="selectedDifficulty.hpDrainRate"
+                    :min="0"
+                    :max="10"
+                    :step="0.1"
+                    :placeholder="t('generate.inheritDefault')"
+                    :aria-label="t('generate.hp')"
+                  />
+                </NFormItem>
+                <NFormItem
+                  :label="t('generate.od')"
+                  :validation-status="
+                    attempted && !validNumber(selectedDifficulty.overallDifficulty, 0, 10)
+                      ? 'error'
+                      : undefined
+                  "
+                  :feedback="
+                    attempted && !validNumber(selectedDifficulty.overallDifficulty, 0, 10)
+                      ? t('generate.numberInvalid', { min: 0, max: 10 })
+                      : undefined
+                  "
+                >
+                  <NInputNumber
+                    v-model:value="selectedDifficulty.overallDifficulty"
+                    :min="0"
+                    :max="10"
+                    :step="0.1"
+                    :placeholder="t('generate.inheritDefault')"
+                    :aria-label="t('generate.od')"
+                  />
+                </NFormItem>
+                <NFormItem
+                  :label="t('generate.sliderMultiplier')"
+                  :validation-status="
+                    attempted && !validNumber(selectedDifficulty.sliderMultiplier, 0.1, 10)
+                      ? 'error'
+                      : undefined
+                  "
+                  :feedback="
+                    attempted && !validNumber(selectedDifficulty.sliderMultiplier, 0.1, 10)
+                      ? t('generate.numberInvalid', { min: 0.1, max: 10 })
+                      : undefined
+                  "
+                >
+                  <NInputNumber
+                    v-model:value="selectedDifficulty.sliderMultiplier"
+                    :min="0.1"
+                    :max="10"
+                    :step="0.1"
+                    :placeholder="t('generate.inheritDefault')"
+                    :aria-label="t('generate.sliderMultiplier')"
+                  />
+                </NFormItem>
+                <NFormItem
+                  :label="t('generate.sliderTickRate')"
+                  :validation-status="
+                    attempted && !validNumber(selectedDifficulty.sliderTickRate, 0.1, 10)
+                      ? 'error'
+                      : undefined
+                  "
+                  :feedback="
+                    attempted && !validNumber(selectedDifficulty.sliderTickRate, 0.1, 10)
+                      ? t('generate.numberInvalid', { min: 0.1, max: 10 })
+                      : undefined
+                  "
+                >
+                  <NInputNumber
+                    v-model:value="selectedDifficulty.sliderTickRate"
+                    :min="0.1"
+                    :max="10"
+                    :step="0.1"
+                    :placeholder="t('generate.inheritDefault')"
+                    :aria-label="t('generate.sliderTickRate')"
+                  />
+                </NFormItem>
                 <div class="switch-row nested">
                   <div>
                     <strong>{{ t('generate.hitsounds') }}</strong
@@ -541,6 +747,28 @@ async function createJob() {
       </div>
 
       <NAlert class="local-note" type="info" :show-icon="false">{{ t('generate.local') }}</NAlert>
+      <div class="request-summary" aria-live="polite">
+        <strong>{{ t('generate.requestSummary') }}</strong>
+        <p>
+          {{ title || t('generate.songTitle') }} — {{ artist || t('generate.artistName') }} ·
+          {{ t('generate.creator') }}: {{ creator.trim() || 'Beatforge AI' }} ·
+          {{ t('generate.songSource') }}: {{ songSource.trim() || '—' }}
+        </p>
+        <p>
+          {{ t('generate.titleUnicode') }}: {{ titleUnicode.trim() || title || '—' }} ·
+          {{ t('generate.artistUnicode') }}: {{ artistUnicode.trim() || artist || '—' }} ·
+          {{ t('generate.publicTags') }}: {{ effectivePublicTags }}
+        </p>
+        <ul>
+          <li v-for="item in difficulties" :key="item.id">
+            {{ item.name }} · {{ item.difficulty.toFixed(1) }}★ · AR {{ item.approachRate }} · CS
+            {{ item.circleSize }} · HP {{ item.hpDrainRate ?? '—' }} · OD
+            {{ item.overallDifficulty ?? '—' }} · SV {{ item.sliderMultiplier ?? '—' }} · Tick
+            {{ item.sliderTickRate ?? '—' }}
+          </li>
+        </ul>
+        <small>{{ t('generate.summaryFallback') }}</small>
+      </div>
       <div class="generate-footer">
         <div class="generation-summary">
           <strong>{{ t('generate.readySummary', { count: difficulties.length }) }}</strong>
@@ -818,6 +1046,16 @@ async function createJob() {
 .metadata-form :deep(.n-form-item) {
   margin-bottom: 10px;
 }
+.metadata-note {
+  margin: 0 0 14px;
+  font-size: 11px;
+}
+.field-help {
+  margin: -6px 0 12px;
+  color: #929bad;
+  font-size: 11px;
+  line-height: 1.5;
+}
 .asset-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1072,6 +1310,36 @@ async function createJob() {
 }
 .local-note {
   margin: 14px 0 0;
+}
+.request-summary {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(127, 127, 127, 0.14);
+  border-radius: 11px;
+  background: rgba(127, 127, 127, 0.025);
+  overflow-wrap: anywhere;
+}
+.request-summary strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.request-summary p,
+.request-summary li,
+.request-summary small {
+  color: #aeb6c4;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.request-summary p {
+  margin: 4px 0;
+}
+.request-summary ul {
+  margin: 8px 0 4px;
+  padding-left: 18px;
+}
+.request-summary small {
+  color: #929bad;
 }
 .generate-footer {
   display: flex;

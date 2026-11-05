@@ -16,7 +16,7 @@ fn output_directory(test_name: &str) -> std::path::PathBuf {
 
 fn start_command(job_id: &str, output_path: &std::path::Path, scenario: &str) -> String {
     serde_json::json!({
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "start_job",
         "jobId": job_id,
         "audioPath": "C:\\Music\\test.mp3",

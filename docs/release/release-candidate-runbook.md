@@ -30,7 +30,7 @@ is never a publishable candidate.
    currently configured `/releases/latest/` endpoint requires a published,
    non-prerelease GitHub Release, not a draft or prerelease.
 
-## Clean Windows acceptance record
+## Windows acceptance record
 
 Record OS build, account/VM, GPU/driver, source commit, artifact checksum,
 date, tester, actual results and evidence locations. Run the lifecycle script
@@ -59,6 +59,8 @@ marked as tested before publication.
 For updater acceptance, use two distinct SemVer builds and the actual embedded
 public key; changing `latest.json` alone is not an update test. Keep the older
 installer, both manifests and an export/backup of app data for recovery.
+
+For 0.2.0, the isolated update check used `artifacts/update-acceptance/Beatforge-0.1.0-to-0.2.0-20261105-032102.zip`. On 2026-11-05, the user reported that the normal update, interrupted download, and offline recovery/retry all passed in an everyday Windows account. The user chose to waive a disposable-account/VM rerun as a 0.2.0 requirement. This did not cover clean-environment installation, and screenshots or logs have not been supplied; the production GitHub updater endpoint still needs separate verification. The disposable-environment restriction for the lifecycle script above remains in force.
 Use the [isolated HTTPS updater acceptance procedure](update-acceptance.md) to
 prepare and verify the two-version test without changing the production endpoint.
 

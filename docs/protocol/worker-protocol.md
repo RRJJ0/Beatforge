@@ -1,10 +1,10 @@
-# Beatforge Worker Protocol v1
+# Beatforge Worker Protocol v2
 
 Beatforge desktop core and generation workers communicate over JSON Lines. Each message is one UTF-8 JSON object followed by `\n`. Worker stdout is reserved for protocol messages; diagnostics belong on stderr.
 
 ## Transport rules
 
-- Current `protocol_version` is `1`.
+- Current `protocol_version` is `2`; the bundled production worker version is `14`. Older workers are rejected explicitly.
 - Maximum message size is 64 KiB.
 - Unknown versions, malformed JSON, and events for the wrong job terminate the worker.
 - The desktop core starts one worker at a time and writes exactly one `start_job` command to stdin.
@@ -14,31 +14,39 @@ Beatforge desktop core and generation workers communicate over JSON Lines. Each 
 ## Start job
 
 ```json
-{"protocolVersion":1,"type":"start_job","jobId":"BF-123","audioPath":"D:\\Music\\song.mp3","outputPath":"C:\\...\\jobs\\BF-123","title":"Song","artist":"Artist","model":"Mapperatorinator Standard","difficulty":5.2,"scenario":"success"}
+{"protocolVersion":2,"type":"start_job","jobId":"BF-123","audioPath":"D:\\Music\\song.mp3","outputPath":"C:\\...\\jobs\\BF-123","title":"Song","artist":"Artist","model":"Mapperatorinator Standard","difficulty":5.2,"scenario":"success"}
 ```
 
 `scenario` is part of the phase 3 mock worker only. Supported values are `success`, `failure`, `oom`, `hang`, `crash`, and `malformed`.
 
 Production commands use snake-case protocol fields and contain only adapter-approved absolute paths, the pinned source/model identities, detected GPU metadata, whitelisted difficulty `configs`, and optional background/video paths staged below the managed job directory. A video start time is an integer from 0 to 3,600,000 ms. Vue cannot supply a checkpoint or output path.
 
+Each production difficulty config includes `request_schema_version`, shared `creator`, `title_unicode`, `artist_unicode`, `source`, and public `tags`, plus optional per-difficulty `hp_drain_rate`, `overall_difficulty`, `slider_multiplier`, and `slider_tick_rate`. The current UI sends request schema `2`; requests saved before 0.2.0 deserialize as schema `1`. A missing numeric value inherits the reference beatmap when present, otherwise the pinned V32 default. Schema `2` uses an empty `Source` when omitted; schema `1` keeps the original reference-source behavior. Unknown config fields and invalid values are rejected before inference.
+
+`configs` contains one entry per requested difficulty (up to eight); `config` repeats the first entry for the single-difficulty path. Rust persists the original request before launching the worker. A retry reads that stored request, then validates and adapts it again under the pinned source/model identities. The worker applies shared metadata and per-difficulty values before upstream `compile_args`, so the settings can affect both generation and the exported `.osu`. Without a reference, omitted HP/OD/slider multiplier/slider tick rate use V32 defaults `5`/`8`/`1.4`/`1`.
+
 ## Progress
 
 ```json
-{"type":"progress","protocol_version":1,"job_id":"BF-123","stage":"generating","percent":62,"message":"Generating hit objects"}
+{"type":"progress","protocol_version":2,"job_id":"BF-123","stage":"generating","percent":62,"message":"Generating hit objects"}
 ```
 
 ## Completed
 
 ```json
-{"type":"completed","protocol_version":1,"job_id":"BF-123","output_path":"C:\\...\\result.osz","warnings":[],"provenance":{"schema_version":1,"job_id":"BF-123","reproduction_key":"sha256...","source":{"mapperatorinator_commit":"0e2b...","worker_version":"13","protocol_version":1},"model":{"package":"mapperatorinator-v32-standard","version":"32..."},"runtime":{"pytorch_version":"2.10.0+cu128","cuda_runtime":"13.0","device":"cuda","precision":"bf16"},"parameters":{"seed":12345,"repair_generated_output":true},"input":{"audio":{"sha256":"..."}},"output":{"sha256":"..."},"timing":{"elapsed_seconds":123.4},"known_limitations":["osu!standard only"],"output_sanitization":{"enabled":true,"defaulted_non_positive_slider_lengths":0,"defaulted_non_positive_slider_svs":0,"dropped_out_of_order_groups":0}}}
+{"type":"completed","protocol_version":2,"job_id":"BF-123","output_path":"C:\\...\\result.osz","warnings":[],"provenance":{"schema_version":2,"job_id":"BF-123","reproduction_key":"sha256...","source":{"mapperatorinator_commit":"0e2b...","worker_version":"14","protocol_version":2},"model":{"package":"mapperatorinator-v32-standard","version":"32..."},"runtime":{"pytorch_version":"2.10.0+cu128","cuda_runtime":"13.0","device":"cuda","precision":"bf16"},"parameters":{"seed":12345,"repair_generated_output":true},"settings":{"slider_multiplier":{"requested":1.6,"applied":1.6,"origin":"explicit"}},"input":{"audio":{"sha256":"..."}},"output":{"sha256":"..."},"timing":{"elapsed_seconds":123.4},"known_limitations":["osu!standard only"],"output_sanitization":{"enabled":true,"defaulted_non_positive_slider_lengths":0,"defaulted_non_positive_slider_svs":0,"dropped_out_of_order_groups":0}}}
 ```
 
 `provenance` is required for the production worker and omitted by the mock worker. Rust stores it in the job's existing `result_json` column before changing the job to `completed`. A missing or unpersistable production record is a terminal protocol failure.
 
+Provenance schema `2` adds `settings` with requested (including `null`), applied, and origin (`explicit`, `reference`, `upstream_default`, or `fallback`) for each public metadata and difficulty field. Multi-difficulty jobs retain this per-difficulty provenance inside `difficulties`; schema `1` historical records remain readable.
+
+Before sending `completed`, the production worker opens the final `.osz` and compares each `.osu` to its own effective metadata and numeric settings. It checks the no-reference V32 numeric defaults as well. A missing difficulty, invalid scalar, or mismatch fails the job. The Rust validator then checks archive paths, referenced assets, beatmap structure, and gameplay semantics before publishing a validated artifact. For multi-difficulty jobs, generation or validation may exclude a failed member; the corresponding `difficulties` entry records its status and warnings identify exclusions. A validated result does not assert mapping quality.
+
 ## Failed
 
 ```json
-{"type":"failed","protocol_version":1,"job_id":"BF-123","code":"CUDA_OUT_OF_MEMORY","message":"GPU memory is insufficient for this job","recoverable":true}
+{"type":"failed","protocol_version":2,"job_id":"BF-123","code":"CUDA_OUT_OF_MEMORY","message":"GPU memory is insufficient for this job","recoverable":true}
 ```
 
 ## Process lifecycle

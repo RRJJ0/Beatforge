@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct DifficultyRequest {
     pub id: String,
     pub name: String,
@@ -18,15 +19,36 @@ pub struct DifficultyRequest {
     pub approach_rate: Option<f64>,
     #[serde(default)]
     pub circle_size: Option<f64>,
+    #[serde(default)]
+    pub hp_drain_rate: Option<f64>,
+    #[serde(default)]
+    pub overall_difficulty: Option<f64>,
+    #[serde(default)]
+    pub slider_multiplier: Option<f64>,
+    #[serde(default)]
+    pub slider_tick_rate: Option<f64>,
     #[serde(default = "default_true")]
     pub hitsounded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct StartJobInput {
+    #[serde(default = "default_request_schema_version")]
+    pub request_schema_version: u8,
     pub title: String,
     pub artist: String,
+    #[serde(default)]
+    pub creator: Option<String>,
+    #[serde(default)]
+    pub title_unicode: Option<String>,
+    #[serde(default)]
+    pub artist_unicode: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub audio_file: String,
     pub model: String,
     pub difficulty: f64,
@@ -61,6 +83,10 @@ pub struct StartJobInput {
 
 fn default_scenario() -> String {
     "success".into()
+}
+
+fn default_request_schema_version() -> u8 {
+    1
 }
 
 fn default_true() -> bool {
@@ -164,7 +190,7 @@ mod tests {
     #[test]
     fn parses_progress_event() {
         let event = parse_worker_event(
-            r#"{"type":"progress","protocol_version":1,"job_id":"job_1","stage":"generating","percent":42,"message":"Working"}"#,
+            r#"{"type":"progress","protocol_version":2,"job_id":"job_1","stage":"generating","percent":42,"message":"Working"}"#,
         )
         .expect("valid event");
         assert_eq!(event.job_id(), "job_1");
@@ -173,7 +199,7 @@ mod tests {
     #[test]
     fn parses_completed_provenance() {
         let event = parse_worker_event(
-            r#"{"type":"completed","protocol_version":1,"job_id":"job_1","output_path":"result.osz","warnings":[],"provenance":{"schema_version":1,"reproduction_key":"abc"}}"#,
+            r#"{"type":"completed","protocol_version":2,"job_id":"job_1","output_path":"result.osz","warnings":[],"provenance":{"schema_version":1,"reproduction_key":"abc"}}"#,
         )
         .expect("valid completed event");
         match event {

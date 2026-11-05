@@ -24,9 +24,10 @@ from typing import Any
 import zipfile
 
 
-PROTOCOL_VERSION = 1
-WORKER_VERSION = "13"
+PROTOCOL_VERSION = 2
+WORKER_VERSION = "15"
 PUBLIC_BEATMAP_TAGS = "Beatforge AI mapperatorinator"
+NEGATIVE_DESCRIPTOR_CFG_SCALE = 1.5
 MAX_MESSAGE_BYTES = 64 * 1024
 PROGRESS_WINDOW = (0.0, 100.0)
 MODEL_CACHE: dict[tuple[Any, ...], tuple[Any, Any]] = {}
@@ -476,9 +477,84 @@ def require_descriptors(value: Any, label: str) -> list[str]:
     return normalized
 
 
-def set_public_beatmap_tags(args: Any) -> None:
+def apply_descriptor_guidance(args: Any, negative_descriptors: list[str]) -> None:
+    # Upstream only constructs the negative prompt when cfg_scale > 1.
+    # Keep the V32 default for jobs without exclusions so existing output stays
+    # reproducible, and enable modest guidance only when exclusions are used.
+    if negative_descriptors:
+        args.cfg_scale = max(args.cfg_scale, NEGATIVE_DESCRIPTOR_CFG_SCALE)
+
+
+def require_optional_metadata_text(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be text")
+    if any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in value):
+        raise ValueError(f"{label} must be one line of at most 200 characters")
+    value = value.strip()
+    if not value:
+        return None
+    if len(value) > 200:
+        raise ValueError(f"{label} must be one line of at most 200 characters")
+    return value
+
+
+def require_public_tags(value: Any) -> list[str]:
+    if not isinstance(value, list) or len(value) > 16:
+        raise ValueError("tags must be a list of at most 16 values")
+    tags = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("tags contains a non-text value")
+        tag = item.strip()
+        if (not tag or len(tag) > 64 or any(
+            character.isspace() or ord(character) < 32 or 127 <= ord(character) <= 159
+            or character in ":=[]" for character in tag
+        ) or tag.casefold() in seen):
+            raise ValueError("tags must be unique safe words of 1 to 64 characters")
+        seen.add(tag.casefold())
+        tags.append(tag)
+    return tags
+
+
+def set_public_beatmap_tags(args: Any, user_tags: list[str] | None = None) -> None:
     """Keep private generation parameters out of exported beatmap metadata."""
-    args.tags = PUBLIC_BEATMAP_TAGS
+    reserved = {tag.casefold() for tag in PUBLIC_BEATMAP_TAGS.split()}
+    visible = [tag for tag in (user_tags or []) if tag.casefold() not in reserved]
+    args.tags = " ".join([*visible, PUBLIC_BEATMAP_TAGS])
+
+
+def apply_public_request_fields(args: Any, config: dict[str, Any]) -> None:
+    """Apply user settings before upstream compiles generation and beatmap configs."""
+    args.title_unicode = config.get("title_unicode") or args.title
+    args.artist_unicode = config.get("artist_unicode") or args.artist
+    args.creator = config.get("creator") or "Beatforge AI"
+    if config.get("request_schema_version", 1) == 2:
+        args.source = config.get("source") or ""
+    for field in ("hp_drain_rate", "overall_difficulty", "slider_multiplier", "slider_tick_rate"):
+        setattr(args, field, config.get(field))
+    set_public_beatmap_tags(args, config.get("tags", []))
+
+
+def setting_resolution(config: dict[str, Any], args: Any, has_reference: bool) -> dict[str, Any]:
+    result = {}
+    for field in ("hp_drain_rate", "overall_difficulty", "slider_multiplier", "slider_tick_rate"):
+        requested = config.get(field)
+        result[field] = {
+            "requested": requested,
+            "applied": getattr(args, field),
+            "origin": "explicit" if requested is not None else "reference" if has_reference else "upstream_default",
+        }
+    for field in ("creator", "title_unicode", "artist_unicode", "source", "tags"):
+        requested = config.get(field)
+        result[field] = {
+            "requested": requested,
+            "applied": getattr(args, field),
+            "origin": "explicit" if requested else "reference" if field == "source" and has_reference and config.get("request_schema_version", 1) == 1 else "fallback",
+        }
+    return result
 
 
 def install_local_v32_backbone_config(model_path: Path) -> None:
@@ -682,8 +758,32 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         raise ValueError("start_job requires a config object")
     if config.get("config_name") != "v32" or config.get("gamemode") != 0:
         raise ValueError("Only the pinned V32 osu!standard configuration is supported")
+    allowed_config_fields = {
+        "config_name", "difficulty_id", "difficulty_name", "gamemode", "difficulty", "seed",
+        "descriptors", "negative_descriptors", "title", "artist", "request_schema_version",
+        "creator", "title_unicode", "artist_unicode", "source", "tags", "approach_rate",
+        "circle_size", "hp_drain_rate", "overall_difficulty", "slider_multiplier",
+        "slider_tick_rate", "hitsounded", "device", "precision", "repair_generated_output",
+        "_set_index",
+    }
+    if set(config) - allowed_config_fields:
+        raise ValueError("start_job config contains unsupported fields")
+    request_schema_version = config.get("request_schema_version", 1)
+    if isinstance(request_schema_version, bool) or request_schema_version not in (1, 2):
+        raise ValueError("Unsupported request schema version")
+    metadata = {
+        field: require_optional_metadata_text(config.get(field), field)
+        for field in ("creator", "title_unicode", "artist_unicode", "source")
+    }
+    metadata["tags"] = require_public_tags(config.get("tags", []))
+    v020_fields = (
+        "creator", "title_unicode", "artist_unicode", "source", "hp_drain_rate",
+        "overall_difficulty", "slider_multiplier", "slider_tick_rate",
+    )
+    if request_schema_version == 1 and (any(config.get(field) is not None for field in v020_fields) or metadata["tags"]):
+        raise ValueError("0.2.0 fields require request schema version 2")
     difficulty_id = config.get("difficulty_id", "difficulty-1")
-    difficulty_name = config.get("difficulty_name") or f"AI {config.get('difficulty', 0):.1f}★"
+    difficulty_name = config.get("difficulty_name") or f"AI {config.get('difficulty', 0):.1f}s"
     if not isinstance(difficulty_id, str) or not difficulty_id.strip() or len(difficulty_id) > 200:
         raise ValueError("difficulty_id is invalid")
     if not isinstance(difficulty_name, str) or not difficulty_name.strip() or len(difficulty_name) > 200:
@@ -698,11 +798,19 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         raise ValueError("A descriptor cannot be both positive and negative")
     for field in ("title", "artist"):
         value = config.get(field)
-        if not isinstance(value, str) or not value.strip() or len(value) > 200:
+        if not isinstance(value, str) or not value.strip() or len(value) > 200 or any(
+            ord(character) < 32 or 127 <= ord(character) <= 159 for character in value
+        ):
             raise ValueError(f"{field} is invalid")
     for field in ("approach_rate", "circle_size"):
         if config.get(field) is not None:
             require_number(config[field], field, 0.0, 10.0)
+    for field in ("hp_drain_rate", "overall_difficulty"):
+        if config.get(field) is not None:
+            require_number(config[field], field, 0.0, 10.0)
+    for field in ("slider_multiplier", "slider_tick_rate"):
+        if config.get(field) is not None:
+            require_number(config[field], field, 0.1, 10.0)
     if not isinstance(config.get("hitsounded"), bool):
         raise ValueError("hitsounded must be boolean")
     if config.get("device") not in {"cuda", "cpu", "auto"}:
@@ -793,11 +901,10 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         args.seed = seed
         args.descriptors = positive
         args.negative_descriptors = negative
+        apply_descriptor_guidance(args, negative)
         args.title = config["title"].strip()
-        args.title_unicode = args.title
         args.artist = config["artist"].strip()
-        args.artist_unicode = args.artist
-        args.creator = "Beatforge AI"
+        apply_public_request_fields(args, config)
         args.version = difficulty_name.strip()
         args.approach_rate = config.get("approach_rate")
         args.circle_size = config.get("circle_size")
@@ -825,7 +932,6 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         if reference_value is not None:
             args.in_context = [inference.ContextType.TIMING]
 
-        set_public_beatmap_tags(args)
         inference.compile_args(args, verbose=True)
         inference.setup_inference_environment(args.seed)
         if args.device == "cuda" and torch.cuda.is_available():
@@ -842,8 +948,17 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         "negative_descriptors": json_value(args.negative_descriptors),
         "title": args.title,
         "artist": args.artist,
+        "creator": args.creator,
+        "title_unicode": args.title_unicode,
+        "artist_unicode": args.artist_unicode,
+        "source": args.source,
+        "tags": args.tags,
         "approach_rate": args.approach_rate,
         "circle_size": args.circle_size,
+        "hp_drain_rate": args.hp_drain_rate,
+        "overall_difficulty": args.overall_difficulty,
+        "slider_multiplier": args.slider_multiplier,
+        "slider_tick_rate": args.slider_tick_rate,
         "hitsounded": args.hitsounded,
         "device": args.device,
         "precision": args.precision,
@@ -968,15 +1083,17 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         if gpu_active
         else None,
     }
+    resolved_settings = setting_resolution(config, args, reference_value is not None)
     reproducible_inputs = {
         "source_commit": source_commit,
         "model_version": model_version,
         "worker_version": WORKER_VERSION,
         "parameters": effective_parameters,
+        "settings": resolved_settings,
         "input": input_summary,
     }
     provenance = {
-        "schema_version": 1,
+        "schema_version": 2,
         "job_id": job_id,
         "reproduction_key": reproduction_key(reproducible_inputs),
         "source": {
@@ -990,6 +1107,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         },
         "runtime": runtime,
         "parameters": effective_parameters,
+        "settings": resolved_settings,
         "input": input_summary,
         "output": file_summary(result_path),
         "timing": {
@@ -1172,6 +1290,85 @@ def sanitization_warnings(provenance: dict[str, Any], difficulty_name: str = "")
     return warnings
 
 
+def verify_output_fields(
+    output_path: Path,
+    completed: list[tuple[dict[str, Any], Path, dict[str, Any]]],
+) -> None:
+    """Check every published .osu against its own effective worker parameters."""
+    if output_path.suffix.lower() == ".osz":
+        with zipfile.ZipFile(output_path) as archive:
+            beatmaps = {
+                entry.filename: archive.read(entry)
+                for entry in archive.infolist()
+                if not entry.is_dir() and entry.filename.lower().endswith(".osu")
+            }
+    else:
+        beatmaps = {output_path.name: output_path.read_bytes()}
+    if len(beatmaps) != len(completed):
+        raise RuntimeError("Generated output has an unexpected difficulty count")
+
+    for fallback_index, (config, _path, provenance) in enumerate(completed, start=1):
+        member = (
+            f"difficulty-{config.get('_set_index', fallback_index)}.osu"
+            if len(completed) > 1 or output_path.name == "beatmap-set.osz"
+            else next(iter(beatmaps))
+        )
+        data = beatmaps.get(member)
+        if data is None:
+            raise RuntimeError(f"Generated output is missing {member}")
+        sections: dict[str, dict[str, str]] = {}
+        current = ""
+        for raw_line in data.decode("utf-8-sig").splitlines():
+            line = raw_line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                current = line[1:-1]
+            elif ":" in line and current in {"Metadata", "Difficulty"}:
+                key, value = line.split(":", 1)
+                sections.setdefault(current, {})[key.strip()] = value.strip()
+        parameters = provenance["parameters"]
+        metadata = sections.get("Metadata", {})
+        difficulty = sections.get("Difficulty", {})
+        expected_text = {
+            "Title": parameters["title"],
+            "Artist": parameters["artist"],
+            "Creator": parameters["creator"],
+            "Version": config["difficulty_name"],
+            "TitleUnicode": parameters["title_unicode"],
+            "ArtistUnicode": parameters["artist_unicode"],
+            "Source": parameters["source"],
+            "Tags": parameters["tags"],
+        }
+        for key, expected in expected_text.items():
+            if expected is not None and metadata.get(key, "") != expected:
+                raise RuntimeError(f"Generated {member} has mismatched Metadata {key}")
+        expected_numbers = {
+            "ApproachRate": parameters["approach_rate"],
+            "CircleSize": parameters["circle_size"],
+            "HPDrainRate": parameters["hp_drain_rate"],
+            "OverallDifficulty": parameters["overall_difficulty"],
+            "SliderMultiplier": parameters["slider_multiplier"],
+            "SliderTickRate": parameters["slider_tick_rate"],
+        }
+        if provenance.get("input", {}).get("reference_beatmap") is None:
+            for key, default in {
+                "HPDrainRate": 5,
+                "OverallDifficulty": 8,
+                "SliderMultiplier": 1.4,
+                "SliderTickRate": 1,
+            }.items():
+                if expected_numbers[key] is None:
+                    expected_numbers[key] = default
+        for key, expected in expected_numbers.items():
+            if expected is None:
+                continue
+            try:
+                actual = float(difficulty[key])
+            except (KeyError, ValueError) as error:
+                raise RuntimeError(f"Generated {member} has invalid Difficulty {key}") from error
+            if not math.isfinite(actual) or not math.isclose(actual, float(expected), abs_tol=1e-5):
+                raise RuntimeError(f"Generated {member} has mismatched Difficulty {key}")
+
+
 def start_job(command: dict[str, Any]) -> int:
     global PROGRESS_WINDOW
     job_id = command.get("job_id")
@@ -1298,6 +1495,7 @@ def start_job(command: dict[str, Any]) -> int:
                 "difficulties": [record.get("provenance", {}).get("reproduction_key") for record in difficulty_records],
             }
             provenance = dict(first)
+            provenance.pop("settings", None)
             provenance.update(
                 {
                     "schema_version": 2,
@@ -1312,6 +1510,10 @@ def start_job(command: dict[str, Any]) -> int:
                     "difficulties": difficulty_records,
                 }
             )
+        verify_output_fields(
+            result_path,
+            [(configs[0], result_path, provenance)] if len(configs) == 1 else completed,
+        )
         send(
             {
                 "type": "completed",

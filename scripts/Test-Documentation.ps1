@@ -13,12 +13,16 @@ $pairs = @(
     @('docs/user/sharing.md', 'docs/user/sharing.zh-TW.md'),
     @('docs/release/release-notes.md', 'docs/release/release-notes.zh-TW.md'),
     @('docs/release/known-issues.md', 'docs/release/known-issues.zh-TW.md'),
+    @('docs/release/v0.2.0-release-notes.md', 'docs/release/v0.2.0-release-notes.zh-TW.md'),
+    @('docs/release/v0.2.0-known-issues.md', 'docs/release/v0.2.0-known-issues.zh-TW.md'),
     @('docs/release/release-candidate-runbook.md', 'docs/release/release-candidate-runbook.zh-TW.md'),
     @('docs/release/windows-installer.md', 'docs/release/windows-installer.zh-TW.md'),
     @('docs/release/updates-and-recovery.md', 'docs/release/updates-and-recovery.zh-TW.md'),
     @('docs/testing/stage-9-gpu-support-matrix.md', 'docs/testing/stage-9-gpu-support-matrix.zh-TW.md'),
     @('docs/legal/licensing-and-distribution.md', 'docs/legal/licensing-and-distribution.zh-TW.md'),
     @('docs/development/README.md', 'docs/development/README.zh-TW.md'),
+    @('docs/development/v0.2.0-plan.md', 'docs/development/v0.2.0-plan.zh-TW.md'),
+    @('docs/development/v0.2.0-field-contract.md', 'docs/development/v0.2.0-field-contract.zh-TW.md'),
     @('docs/development/roadmap.md', 'docs/development/roadmap.zh-TW.md'),
     @('docs/ui/README.md', 'docs/ui/README.zh-TW.md')
 )

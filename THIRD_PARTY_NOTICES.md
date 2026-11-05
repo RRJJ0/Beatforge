@@ -2,7 +2,7 @@
 
 [繁體中文摘要](THIRD_PARTY_NOTICES.zh-TW.md) · [Home](README.md)
 
-This file applies to Beatforge 0.1.0. Beatforge itself is available under the
+This file applies to Beatforge 0.2.0. Beatforge itself is available under the
 MIT License in `LICENSE`. That license does not relicense third-party software,
 model weights, media, or user content.
 
