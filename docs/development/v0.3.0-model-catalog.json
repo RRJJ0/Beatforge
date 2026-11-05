@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Research inventory for 0.3-01; not an application package manifest",
+  "checkedAt": "2026-11-05",
+  "source": {
+    "repository": "https://github.com/OliBomby/Mapperatorinator",
+    "commit": "0e2b0e387aab4b35c64b0b11b12d47578dea7587"
+  },
+  "models": [
+    {
+      "id": "mapperatorinator-v30-standard",
+      "name": "Mapperatorinator V30",
+      "repository": "https://huggingface.co/OliBomby/Mapperatorinator-v30",
+      "revision": "a4c6e6e69c055711c2293d63161c0e52980e56a1",
+      "modelSubdirectory": "",
+      "licenseStatus": "unconfirmed",
+      "plannedAcquisition": "manual_import_only",
+      "availability": "research_only",
+      "capabilities": {
+        "standard": "config_supported_unverified",
+        "targetDifficultyCondition": "unsupported_by_training_config",
+        "descriptors": "unsupported_by_training_config",
+        "hitsoundedCondition": "unsupported_by_training_config",
+        "globalSliderVelocityCondition": "unsupported_by_training_config",
+        "referenceTiming": "unverified",
+        "numericAndMetadataOutput": "unverified"
+      },
+      "trainingConfig": { "path": "configs/train/v30.yaml", "sha256": "ffa77a9cfb18e7508e1d68164f106df046a863b2b5bed68707fd55509f22e7e1" },
+      "inferenceConfig": { "path": "configs/inference/v30.yaml", "sha256": "e9ac471c04d8c944e277285df9fda05c991da85dda456b3fe642395c3f803f84" },
+      "files": [
+        { "path": "model.safetensors", "sizeBytes": 861280756, "sha256": "28c56449d9bb23afdd2b0a16743ce27dd37aabc5b1a846c78efa63485454fc97", "evidence": "huggingface_lfs_metadata" },
+        { "path": "config.json", "sizeBytes": 2237, "sha256": "3f0bc161f22d838a7a1582ea0231816dbf4e26ee04e030394f1ceb05e3bdb2cb", "evidence": "downloaded_and_hashed" },
+        { "path": "generation_config.json", "sizeBytes": 231, "sha256": "cdd37c2acd98f11d2160f4a6be5766a39495bb148c8526a51611576016e2db97", "evidence": "downloaded_and_hashed" },
+        { "path": "tokenizer.json", "sizeBytes": 1876018, "sha256": "d801be48048583822b55cd4c8ef1e382c38934c8e1b9496e0be83cab3048f8e2", "evidence": "downloaded_and_hashed" }
+      ]
+    },
+    {
+      "id": "mapperatorinator-v31-standard",
+      "name": "Mapperatorinator V31",
+      "repository": "https://huggingface.co/OliBomby/Mapperatorinator-v31",
+      "revision": "12772791b862b97a11153aa766b2481afa5dda11",
+      "modelSubdirectory": "",
+      "licenseStatus": "unconfirmed",
+      "plannedAcquisition": "manual_import_only",
+      "availability": "research_only",
+      "capabilities": {
+        "standard": "config_supported_unverified",
+        "targetDifficultyCondition": "unsupported_by_training_config",
+        "descriptors": "config_supported_unverified",
+        "hitsoundedCondition": "config_supported_unverified",
+        "globalSliderVelocityCondition": "config_supported_unverified",
+        "referenceTiming": "unverified",
+        "numericAndMetadataOutput": "unverified"
+      },
+      "trainingConfig": { "path": "configs/train/v31.yaml", "sha256": "227c017d1d6a2ea9ed58c2738841f72060559706960dcd3127329cb95cdf8df8" },
+      "inferenceConfig": { "path": "configs/inference/v31.yaml", "sha256": "6068ba6229a4bddb2ad461687539688c6cbff956e527dfe4f5a48853ef872ed6" },
+      "files": [
+        { "path": "model.safetensors", "sizeBytes": 880954204, "sha256": "8adeaea3dd1be66d1df42fb3fe7e471797be1a89c765f656dd37c489cdda11d6", "evidence": "huggingface_lfs_metadata" },
+        { "path": "config.json", "sizeBytes": 2756, "sha256": "250551fbc9fa300cebb9468c7340b932145c496d4fcaae2f457c9fd82714320b", "evidence": "downloaded_and_hashed" },
+        { "path": "generation_config.json", "sizeBytes": 259, "sha256": "668105b2e2df1f1adbcfa453cd6ec2087b9cce0a8e7cf1edabd5b377ece3f0ac", "evidence": "downloaded_and_hashed" },
+        { "path": "tokenizer.json", "sizeBytes": 3082188, "sha256": "db48ee9de0608264c48cb3746048a5bf401a4e4ac28bf296f57b58c622b33210", "evidence": "downloaded_and_hashed" }
+      ]
+    },
+    {
+      "id": "mapperatorinator-v32-mini-standard",
+      "name": "Mapperatorinator V32-mini",
+      "repository": "https://huggingface.co/OliBomby/Mapperatorinator-v32-mini",
+      "revision": "7807f0dc70cab671be012e1f5ddf945b0b8b7278",
+      "modelSubdirectory": "gamemode=0",
+      "licenseStatus": "mit_in_model_card",
+      "plannedAcquisition": "upstream_download",
+      "availability": "research_only",
+      "capabilities": {
+        "standard": "config_supported_unverified",
+        "targetDifficultyCondition": "config_supported_unverified",
+        "descriptors": "config_supported_unverified",
+        "hitsoundedCondition": "config_supported_unverified",
+        "globalSliderVelocityCondition": "config_supported_unverified",
+        "referenceTiming": "unverified",
+        "numericAndMetadataOutput": "unverified"
+      },
+      "trainingConfig": { "path": "configs/train/v32-mini.yaml", "sha256": "9ddd9eaf176802cac8509cc5ee63487bd2ba93c63e894bb498113da86acf0f6a" },
+      "inferenceConfig": { "path": "configs/inference/v32-mini.yaml", "sha256": "1e691e0c9bfe010ade1439a18a6eaad7444bc8b888df3c336e62e82ef89f14db" },
+      "files": [
+        { "path": "gamemode=0/model.safetensors", "sizeBytes": 222891244, "sha256": "a7a795018ea39747be369e571a19319954f999e93925e0c47aa9a807d22c8d7b", "evidence": "huggingface_lfs_metadata" },
+        { "path": "gamemode=0/config.json", "sizeBytes": 2963, "sha256": "df23449d5ddc05e07fb30a576b39aed0703de94c8418086a9ebd6e537a65acc0", "evidence": "downloaded_and_hashed" },
+        { "path": "gamemode=0/generation_config.json", "sizeBytes": 259, "sha256": "10b901beeb3c982c16c53cd5b37a4f9b3d4674fc70cbc3e64c7b20fdb0433f51", "evidence": "downloaded_and_hashed" },
+        { "path": "gamemode=0/tokenizer.json", "sizeBytes": 4974127, "sha256": "6b98be0fc04a95a9e9d4feb8e8b67cc48728a6667e3091dcd5cc528baeca18bd", "evidence": "downloaded_and_hashed" }
+      ]
+    },
+    {
+      "id": "mapperatorinator-v32-standard",
+      "name": "Mapperatorinator V32",
+      "repository": "https://huggingface.co/OliBomby/Mapperatorinator-v32",
+      "revision": "74f22583400d259bf424819e11027c17933efe54",
+      "modelSubdirectory": "gamemode=0",
+      "licenseStatus": "mit_in_model_card",
+      "plannedAcquisition": "upstream_download",
+      "availability": "supported_in_0_2_0",
+      "capabilities": {
+        "standard": "supported_in_0_2_0",
+        "targetDifficultyCondition": "supported_in_0_2_0",
+        "descriptors": "supported_in_0_2_0",
+        "hitsoundedCondition": "supported_in_0_2_0",
+        "globalSliderVelocityCondition": "supported_in_0_2_0",
+        "referenceTiming": "supported_in_0_2_0",
+        "numericAndMetadataOutput": "supported_in_0_2_0"
+      },
+      "trainingConfig": { "path": "configs/train/v32.yaml", "sha256": "6c38d315b9b6d497e1ac24954f02d4ae3e6d07b3369e3f38266c2f8db4b3f774" },
+      "inferenceConfig": { "path": "configs/inference/v32.yaml", "sha256": "ff6f100be5f2ab241c6c0929e8df3f8780cac2c76494880689870a26e8be9ba3" },
+      "files": [
+        { "path": "gamemode=0/model.safetensors", "sizeBytes": 865544236, "sha256": "dc60cf15609a1e93bf2280b360f00ba30b833c8e95d088db21babe44e1c4d6e9", "evidence": "existing_beatforge_lock" },
+        { "path": "gamemode=0/config.json", "sizeBytes": 2972, "sha256": "ff96b8c059179978c93b6f938e39fac945d5682a3495789c00cc159d571a1a22", "evidence": "existing_beatforge_lock" },
+        { "path": "gamemode=0/generation_config.json", "sizeBytes": 259, "sha256": "10b901beeb3c982c16c53cd5b37a4f9b3d4674fc70cbc3e64c7b20fdb0433f51", "evidence": "existing_beatforge_lock" },
+        { "path": "gamemode=0/tokenizer.json", "sizeBytes": 4974127, "sha256": "6b98be0fc04a95a9e9d4feb8e8b67cc48728a6667e3091dcd5cc528baeca18bd", "evidence": "existing_beatforge_lock" }
+      ]
+    }
+  ]
+}

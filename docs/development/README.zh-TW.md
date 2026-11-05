@@ -6,7 +6,8 @@
 [階段與決策詳細紀錄](roadmap.zh-TW.md)，另有較精簡的
 [英文階段摘要](roadmap.md)。這些是歷史開發紀錄，不代表每一項都已成為目前功能。
 
-下一版範圍見 [0.3.0 開發規劃草案](v0.3.0-plan.zh-TW.md)。
+下一版範圍見 [0.3.0 開發規劃草案](v0.3.0-plan.zh-TW.md)與
+[模型目錄調查](v0.3.0-model-catalog.zh-TW.md)。
 0.2.0 的規劃與欄位決議保存在[開發規劃](v0.2.0-plan.zh-TW.md)與
 [欄位契約](v0.2.0-field-contract.zh-TW.md)。
 

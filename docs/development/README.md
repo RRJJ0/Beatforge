@@ -7,7 +7,8 @@ The original planning-heavy README is preserved as the
 An [English milestone overview](roadmap.md) provides a shorter companion.
 These are historical development records, not end-user feature promises.
 
-For the next version, see the [0.3.0 development plan draft](v0.3.0-plan.md).
+For the next version, see the [0.3.0 development plan draft](v0.3.0-plan.md)
+and [model catalog research](v0.3.0-model-catalog.md).
 The 0.2.0 [plan](v0.2.0-plan.md) and [field contract](v0.2.0-field-contract.md)
 remain available as development records.
 
