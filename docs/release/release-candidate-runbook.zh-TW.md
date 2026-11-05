@@ -26,7 +26,7 @@
    存取及驗證後才發布 `latest.json`。目前程式的 `/releases/latest/` 端點
    需要已公開、非 prerelease 的 GitHub Release；draft 或 prerelease 不會成為 latest。
 
-## 乾淨 Windows 環境驗收紀錄
+## Windows 環境驗收紀錄
 
 記錄 Windows build、帳號／VM、GPU／驅動、Git commit、artifact checksum、
 日期、測試者、實際結果與證據位置。生命週期腳本只能在一次性帳號／VM 執行，
@@ -54,6 +54,8 @@
 不算更新測試。保留舊版 installer、兩版 manifest 與 app-data 備份。
 可依照[隔離 HTTPS updater 驗收流程](update-acceptance.zh-TW.md)準備兩版本測試，
 不必變更正式端點。
+
+0.2.0 的隔離更新驗收使用 `artifacts/update-acceptance/Beatforge-0.1.0-to-0.2.0-20261105-032102.zip`。使用者於 2026-11-05 回報正常更新、下載中斷及離線復原／重試均通過；測試在日常 Windows 帳號執行。使用者決定不將一次性帳號或 VM 重測列為 0.2.0 的必要條件。此結果未涵蓋乾淨環境安裝，且尚無畫面或日誌證據；正式 GitHub updater 端點須另驗。前述生命週期腳本的一次性環境限制不變。
 
 ## 回退與修復
 

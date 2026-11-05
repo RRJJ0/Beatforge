@@ -2,7 +2,7 @@
 
 [English — authoritative notices](THIRD_PARTY_NOTICES.md) · [首頁](README.zh-TW.md)
 
-此文件說明 Beatforge 0.1.0 的第三方元件；英文原文與上游授權文件為正式依據。
+此文件說明 Beatforge 0.2.0 的第三方元件；英文原文與上游授權文件為正式依據。
 Beatforge 本身採 [MIT License](LICENSE)。此授權不會把第三方軟體、模型權重、
 媒體或使用者內容改為 MIT 授權。本說明僅供資訊參考，不是法律意見。
 
