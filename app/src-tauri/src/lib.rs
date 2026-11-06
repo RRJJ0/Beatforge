@@ -1273,6 +1273,9 @@ fn build_production_request(
         source_commit,
         model_path,
         model_version: model.target_version,
+        model_source: model
+            .source_url
+            .ok_or_else(|| "Managed model source is unavailable".to_string())?,
         device: settings.device,
         precision: settings.precision,
         repair_generated_output: settings.repair_generated_output,
@@ -1292,9 +1295,6 @@ fn create_job(
     validate_job_input(&input)?;
     let (connection, paths) = open_database(&app)?;
     pin_job_model(&connection, &paths, &mut input, true)?;
-    if input.scenario == "success" && input.model != packages::STANDARD_MODEL_ID {
-        return Err("This model's inference adapter is pending 0.3-04".into());
-    }
     let settings = load_settings_value(&app)?;
     if settings.device == "cuda" {
         let gpu = detect_gpu();
@@ -2045,17 +2045,31 @@ async fn diagnose_ai_environment(
 }
 
 #[tauri::command]
-async fn diagnose_production_worker(app: AppHandle) -> Result<formal_worker::WorkerHealth, String> {
+async fn diagnose_production_worker(
+    app: AppHandle,
+    model_id: Option<String>,
+) -> Result<formal_worker::WorkerHealth, String> {
     let python = installed_python(&app)?.ok_or_else(|| {
         "Install the private Python runtime before checking the worker".to_string()
     })?;
     let (connection, paths) = open_database(&app)?;
-    let model = packages::get(&connection, packages::STANDARD_MODEL_ID)?
-        .ok_or_else(|| "Managed V32 model package is unavailable".to_string())?;
+    let model_id = model_id.unwrap_or_else(|| packages::STANDARD_MODEL_ID.to_string());
+    if !packages::builtin_manifest()
+        .packages
+        .iter()
+        .any(|spec| spec.kind == packages::PackageKind::Model && spec.id == model_id)
+    {
+        return Err("Unknown or unsupported managed model ID".into());
+    }
+    let model = packages::get(&connection, &model_id)?
+        .ok_or_else(|| format!("Managed model {model_id} is unavailable"))?;
     let model_path = (model.status == packages::PackageStatus::Installed)
         .then(|| model.install_path.as_deref().map(PathBuf::from))
         .flatten();
     let model_version = model.target_version;
+    let model_source = model
+        .source_url
+        .ok_or_else(|| "Managed model source is unavailable".to_string())?;
     let runtime_root = PathBuf::from(paths.runtime);
     let source_path = mapperatorinator::managed_source_path(&runtime_root)?;
     let source_commit = mapperatorinator_lock::builtin()?.source.commit;
@@ -2067,7 +2081,9 @@ async fn diagnose_production_worker(app: AppHandle) -> Result<formal_worker::Wor
             &source_path,
             &source_commit,
             model_path.as_deref(),
+            &model_id,
             &model_version,
+            &model_source,
             &log_path,
         )
     })
@@ -2153,9 +2169,6 @@ fn retry_job(
     }
     validate_job_input(&input)?;
     pin_job_model(&connection, &paths, &mut input, false)?;
-    if input.scenario == "success" && input.model != packages::STANDARD_MODEL_ID {
-        return Err("This model's inference adapter is pending 0.3-04".into());
-    }
     worker::cleanup_job_artifacts(&app, &job_id)?;
     jobs::reset_for_retry(&connection, &job_id)?;
     manager.enqueue(job_id, input)
@@ -2181,9 +2194,6 @@ fn regenerate_job(
     pin_job_model(&connection, &paths, &mut input, false).map_err(|error| {
         format!("The source job cannot be regenerated with its original model: {error}")
     })?;
-    if input.scenario == "success" && input.model != packages::STANDARD_MODEL_ID {
-        return Err("This model's inference adapter is pending 0.3-04".into());
-    }
 
     let new_id = next_job_id();
     let record = jobs::insert(&connection, &new_id, &input)?;

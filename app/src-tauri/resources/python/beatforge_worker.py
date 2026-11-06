@@ -25,7 +25,13 @@ import zipfile
 
 
 PROTOCOL_VERSION = 2
-WORKER_VERSION = "15"
+WORKER_VERSION = "16"
+MODEL_CONFIGS = {
+    "mapperatorinator-v30-standard": ("v30", "Tiger14n/ropewhisper-small", 768),
+    "mapperatorinator-v31-standard": ("v31", "Tiger14n/ropewhisper-small", 768),
+    "mapperatorinator-v32-mini-standard": ("v32-mini", "OliBomby/varwhisper-base", 512),
+    "mapperatorinator-v32-standard": ("v32", "OliBomby/varwhisper-small", 768),
+}
 PUBLIC_BEATMAP_TAGS = "Beatforge AI mapperatorinator"
 NEGATIVE_DESCRIPTOR_CFG_SCALE = 1.5
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -557,22 +563,21 @@ def setting_resolution(config: dict[str, Any], args: Any, has_reference: bool) -
     return result
 
 
-def install_local_v32_backbone_config(model_path: Path) -> None:
-    """Prevent the pinned custom config from resolving Whisper metadata remotely.
-
-    The V32 config.json already embeds the complete VarWhisper backbone config,
-    but the pinned custom MapperatorinatorConfig constructor calls
-    VarWhisperConfig.from_pretrained("openai/whisper-small") before applying it.
-    """
+def install_local_backbone_config(model_path: Path, model_id: str) -> None:
+    """Use the checkpoint's embedded backbone metadata without network access."""
+    _, expected_backbone, expected_width = MODEL_CONFIGS[model_id]
     model_config = json.loads((model_path / "config.json").read_text("utf-8"))
-    if model_config.get("backbone_model_name") != "OliBomby/varwhisper-small":
-        raise RuntimeError("Managed V32 model has an unsupported backbone identity")
+    if model_config.get("model_type") != "mapperatorinator" or model_config.get("backbone_model_name") != expected_backbone:
+        raise RuntimeError(f"Managed {model_id} has an unsupported backbone identity")
     backbone_config = model_config.get("backbone_config")
-    if not isinstance(backbone_config, dict) or backbone_config.get("d_model") != 768:
-        raise RuntimeError("Managed V32 model is missing its embedded backbone configuration")
+    if not isinstance(backbone_config, dict) or backbone_config.get("d_model") != expected_width:
+        raise RuntimeError(f"Managed {model_id} is missing its embedded backbone configuration")
 
     from osuT5.osuT5.model.custom_transformers.configuration_varwhisper import (
         VarWhisperConfig,
+    )
+    from osuT5.osuT5.model.custom_transformers.configuration_ropewhisper import (
+        RoPEWhisperConfig,
     )
     from transformers import WhisperConfig
 
@@ -581,7 +586,23 @@ def install_local_v32_backbone_config(model_path: Path) -> None:
         return cls.from_dict(dict(backbone_config))
 
     VarWhisperConfig.from_pretrained = classmethod(from_embedded)
+    RoPEWhisperConfig.from_pretrained = classmethod(from_embedded)
     WhisperConfig.from_pretrained = classmethod(from_embedded)
+
+
+def resolve_model_identity(command: dict[str, Any]) -> tuple[str, str, str, str]:
+    model_id = command.get("model_id", "mapperatorinator-v32-standard")
+    if model_id not in MODEL_CONFIGS:
+        raise ValueError("Unknown or unsupported managed model ID")
+    config_name = MODEL_CONFIGS[model_id][0]
+    version = command.get("model_version")
+    if not isinstance(version, str) or not version.startswith(config_name.removeprefix("v") + "."):
+        raise ValueError("model_version does not match model_id")
+    source = command.get("model_source")
+    expected_source = f"https://huggingface.co/OliBomby/Mapperatorinator-{config_name}/tree/"
+    if not isinstance(source, str) or not source.startswith(expected_source):
+        raise ValueError("model_source is missing or unsupported")
+    return model_id, version, source, config_name
 
 
 def health_check(command: dict[str, Any]) -> int:
@@ -590,6 +611,8 @@ def health_check(command: dict[str, Any]) -> int:
     model_path = normalized_path(command.get("model_path"))
     expected_source_commit = str(command.get("source_commit") or "")
     expected_model_version = str(command.get("model_version") or "")
+    model_id = command.get("model_id", "mapperatorinator-v32-standard")
+    model_source = command.get("model_source")
 
     report: dict[str, Any] = {
         "type": "health",
@@ -605,7 +628,9 @@ def health_check(command: dict[str, Any]) -> int:
         "ffmpeg_version": None,
         "ffmpeg_executable": None,
         "mapperatorinator_commit": expected_source_commit or None,
+        "model_id": model_id,
         "model_version": expected_model_version or None,
+        "model_source": model_source,
         "model_path": str(model_path) if model_path else None,
         "errors": errors,
     }
@@ -664,12 +689,27 @@ def health_check(command: dict[str, Any]) -> int:
         "generation_config.json",
         "tokenizer.json",
     )
+    try:
+        resolved_id, _, _, config_name = resolve_model_identity(command)
+    except ValueError as error:
+        errors.append(f"Model: {error}")
+        resolved_id = None
+        config_name = None
     if model_path is None:
-        errors.append("Model: managed V32 model is not installed")
+        errors.append(f"Model: managed {model_id} is not installed")
     else:
         missing = [name for name in required_model_files if not (model_path / name).is_file()]
         if missing:
             errors.append("Model: missing " + ", ".join(missing))
+        elif resolved_id is not None:
+            try:
+                config = json.loads((model_path / "config.json").read_text("utf-8"))
+                if config.get("backbone_model_name") != MODEL_CONFIGS[resolved_id][1]:
+                    raise ValueError("backbone identity differs from the selected model")
+                if source_path is None or not (source_path / "configs" / "inference" / f"{config_name}.yaml").is_file():
+                    raise ValueError("inference config is missing from the managed source")
+            except (OSError, ValueError) as error:
+                errors.append(f"Model: {error}")
 
     report["ready"] = not errors
     send(report)
@@ -742,9 +782,9 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     source_marker = json.loads((source_path / ".beatforge-install.json").read_text("utf-8"))
     if source_marker.get("sourceCommit") != source_commit:
         raise ValueError("source_path does not match source_commit")
-    model_version = command.get("model_version")
-    if not isinstance(model_version, str) or not model_version:
-        raise ValueError("model_version is missing")
+    model_id, model_version, model_source, config_name = resolve_model_identity(command)
+    if reference_value is not None and config_name != "v32":
+        raise ValueError("Reference timing is not yet verified for this model")
     missing_model_files = [
         name
         for name in ("model.safetensors", "config.json", "generation_config.json", "tokenizer.json")
@@ -756,8 +796,8 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     config = command.get("config")
     if not isinstance(config, dict):
         raise ValueError("start_job requires a config object")
-    if config.get("config_name") != "v32" or config.get("gamemode") != 0:
-        raise ValueError("Only the pinned V32 osu!standard configuration is supported")
+    if config.get("config_name") != config_name or config.get("gamemode") != 0:
+        raise ValueError("Inference configuration does not match the selected osu!standard model")
     allowed_config_fields = {
         "config_name", "difficulty_id", "difficulty_name", "gamemode", "difficulty", "seed",
         "descriptors", "negative_descriptors", "title", "artist", "request_schema_version",
@@ -788,7 +828,11 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         raise ValueError("difficulty_id is invalid")
     if not isinstance(difficulty_name, str) or not difficulty_name.strip() or len(difficulty_name) > 200:
         raise ValueError("difficulty_name is invalid")
-    require_number(config.get("difficulty"), "difficulty", 1.0, 8.0)
+    if config_name in {"v30", "v31"}:
+        if config.get("difficulty") != 0:
+            raise ValueError(f"{config_name} does not support target difficulty; use 0")
+    else:
+        require_number(config.get("difficulty"), "difficulty", 1.0, 8.0)
     seed = config.get("seed")
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 65_535:
         raise ValueError("seed must be an integer between 0 and 65535")
@@ -796,6 +840,8 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     negative = require_descriptors(config.get("negative_descriptors"), "negative_descriptors")
     if {item.casefold() for item in positive} & {item.casefold() for item in negative}:
         raise ValueError("A descriptor cannot be both positive and negative")
+    if config_name == "v30" and (positive or negative or config.get("hitsounded")):
+        raise ValueError("V30 does not support descriptors or hitsound conditioning")
     for field in ("title", "artist"):
         value = config.get(field)
         if not isinstance(value, str) or not value.strip() or len(value) > 200 or any(
@@ -871,7 +917,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
 
     with loading_step(job_id, "loading_inference_config", 10, "Loading inference configuration"):
         with contextlib.redirect_stdout(sys.stderr):
-            install_local_v32_backbone_config(model_path)
+            install_local_backbone_config(model_path, model_id)
             from hydra import compose, initialize_config_dir
             from omegaconf import OmegaConf
 
@@ -884,12 +930,12 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         daemon=True,
     ).start()
 
-    progress(job_id, "configuring", 12, "Compiling the V32 inference configuration")
+    progress(job_id, "configuring", 12, f"Compiling the {config_name} inference configuration")
     with contextlib.redirect_stdout(sys.stderr):
         with initialize_config_dir(
             config_dir=str(source_path / "configs" / "inference"), version_base="1.1"
         ):
-            args = OmegaConf.to_object(compose(config_name="v32"))
+            args = OmegaConf.to_object(compose(config_name=config_name))
 
         args.model_path = str(model_path)
         args.auto_select_gamemode_model = False
@@ -897,7 +943,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         args.output_path = str(output_path)
         args.beatmap_path = str(reference_path) if reference_value is not None else ""
         args.gamemode = config["gamemode"]
-        args.difficulty = config["difficulty"]
+        args.difficulty = None if config_name in {"v30", "v31"} else config["difficulty"]
         args.seed = seed
         args.descriptors = positive
         args.negative_descriptors = negative
@@ -910,10 +956,10 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         args.circle_size = config.get("circle_size")
         args.hitsounded = config["hitsounded"]
         args.device = config["device"]
-        # V32 is trained and shipped with bf16 as its CUDA precision. Older
+        # The pinned models ship with bf16 as their CUDA precision. Older
         # Beatforge settings exposed fp16, but that can collapse the timing
         # logits into an invalid all-zero sampling distribution. Treat fp16 as
-        # the legacy spelling for V32's bf16 mode; compile_args will safely
+        # the legacy spelling for bf16 mode; compile_args will safely
         # fall back to fp32 on GPUs without native bf16 support.
         args.precision = "bf16" if config["precision"] == "fp16" else config["precision"]
         args.lora_path = None
@@ -938,7 +984,7 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             torch.cuda.reset_peak_memory_stats()
 
     effective_parameters = {
-        "config_name": "v32",
+        "config_name": config_name,
         "gamemode": args.gamemode,
         "difficulty": args.difficulty,
         "difficulty_id": difficulty_id,
@@ -980,8 +1026,8 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
         "timeshift_bias": args.timeshift_bias,
     }
 
-    progress(job_id, "loading_model", 20, "Loading the managed V32 model")
-    with heartbeat(job_id, "loading_model", 20, "The V32 model is still loading"):
+    progress(job_id, "loading_model", 20, f"Loading the managed {config_name} model")
+    with heartbeat(job_id, "loading_model", 20, f"The {config_name} model is still loading"):
         with contextlib.redirect_stdout(sys.stderr):
             model_key = (
                 args.model_path,
@@ -1086,7 +1132,9 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
     resolved_settings = setting_resolution(config, args, reference_value is not None)
     reproducible_inputs = {
         "source_commit": source_commit,
+        "model_id": model_id,
         "model_version": model_version,
+        "model_source": model_source,
         "worker_version": WORKER_VERSION,
         "parameters": effective_parameters,
         "settings": resolved_settings,
@@ -1102,8 +1150,9 @@ def run_inference(command: dict[str, Any], job_id: str) -> tuple[Path, dict[str,
             "protocol_version": PROTOCOL_VERSION,
         },
         "model": {
-            "package": "mapperatorinator-v32-standard",
+            "package": model_id,
             "version": model_version,
+            "source": model_source,
         },
         "runtime": runtime,
         "parameters": effective_parameters,
@@ -1490,7 +1539,9 @@ def start_job(command: dict[str, Any]) -> int:
             completed_at = datetime.now(timezone.utc)
             reproducible_inputs = {
                 "source_commit": command.get("source_commit"),
+                "model_id": command.get("model_id"),
                 "model_version": command.get("model_version"),
+                "model_source": command.get("model_source"),
                 "worker_version": WORKER_VERSION,
                 "difficulties": [record.get("provenance", {}).get("reproduction_key") for record in difficulty_records],
             }

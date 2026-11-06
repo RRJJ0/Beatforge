@@ -32,6 +32,7 @@ pub struct AdapterContext {
     pub source_commit: String,
     pub model_path: PathBuf,
     pub model_version: String,
+    pub model_source: String,
     pub device: String,
     pub precision: String,
     pub repair_generated_output: bool,
@@ -49,7 +50,9 @@ pub struct ProductionWorkerStartCommand {
     pub source_path: String,
     pub source_commit: String,
     pub model_path: String,
+    pub model_id: String,
     pub model_version: String,
+    pub model_source: String,
     pub gpu_name: Option<String>,
     pub gpu_memory_total_mb: Option<u64>,
     pub driver_version: Option<String>,
@@ -116,6 +119,16 @@ fn requested_difficulties(input: &StartJobInput) -> Vec<DifficultyRequest> {
         vec![legacy_difficulty(input)]
     } else {
         input.difficulties.clone()
+    }
+}
+
+fn model_config_name(model_id: &str) -> Result<&'static str, String> {
+    match model_id {
+        "mapperatorinator-v30-standard" => Ok("v30"),
+        "mapperatorinator-v31-standard" => Ok("v31"),
+        "mapperatorinator-v32-mini-standard" => Ok("v32-mini"),
+        packages::STANDARD_MODEL_ID => Ok("v32"),
+        _ => Err("Unknown or unsupported managed model ID".into()),
     }
 }
 
@@ -252,14 +265,34 @@ pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
         if !names.insert(difficulty.name.trim().to_lowercase()) {
             return Err("Difficulty names must be unique".into());
         }
-        if !difficulty.difficulty.is_finite() || !(1.0..=8.0).contains(&difficulty.difficulty) {
-            return Err("Difficulty must be between 1.0 and 8.0".into());
+        let unsupported_target_difficulty = matches!(
+            input.model.as_str(),
+            "mapperatorinator-v30-standard" | "mapperatorinator-v31-standard"
+        );
+        if !difficulty.difficulty.is_finite()
+            || !(1.0..=8.0).contains(&difficulty.difficulty)
+                && !(unsupported_target_difficulty && difficulty.difficulty == 0.0)
+        {
+            return Err("Difficulty must be between 1.0 and 8.0, or 0 for a model without target difficulty conditioning".into());
         }
         if difficulty.seed > MAX_SEED {
             return Err(format!("Seed must be between 0 and {MAX_SEED}"));
         }
         validate_descriptors(&difficulty.descriptors, "Descriptors")?;
         validate_descriptors(&difficulty.negative_descriptors, "Negative descriptors")?;
+        if unsupported_target_difficulty && difficulty.difficulty != 0.0 {
+            return Err(format!(
+                "{} does not support target difficulty; use 0 for no difficulty conditioning",
+                input.model
+            ));
+        }
+        if input.model == "mapperatorinator-v30-standard"
+            && (!difficulty.descriptors.is_empty()
+                || !difficulty.negative_descriptors.is_empty()
+                || difficulty.hitsounded)
+        {
+            return Err("V30 does not support descriptors or hitsound conditioning".into());
+        }
         let positives = difficulty
             .descriptors
             .iter()
@@ -293,6 +326,9 @@ pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
         &["mp3", "wav", "ogg", "m4a", "flac"],
     )?;
     if let Some(path) = input.reference_beatmap.as_deref() {
+        if input.model != packages::STANDARD_MODEL_ID {
+            return Err("Reference timing is not yet verified for this model".into());
+        }
         validate_input_file(Path::new(path), "reference beatmap", &["osu"])?;
     }
     if let Some(path) = input.background_image.as_deref() {
@@ -361,8 +397,11 @@ pub fn build(
     context: &AdapterContext,
 ) -> Result<ProductionWorkerStartCommand, String> {
     validate_domain(input)?;
-    if input.model != packages::STANDARD_MODEL_ID {
-        return Err("This model's inference adapter is pending 0.3-04".into());
+    let config_name = model_config_name(&input.model)?;
+    let expected_source =
+        format!("https://huggingface.co/OliBomby/Mapperatorinator-{config_name}/tree/");
+    if !context.model_source.starts_with(&expected_source) {
+        return Err("Resolved model source does not match the selected model".into());
     }
     if input
         .model_version
@@ -370,6 +409,13 @@ pub fn build(
         .is_some_and(|version| version != context.model_version)
     {
         return Err("Requested model version differs from the resolved managed model".into());
+    }
+    if input
+        .model_source
+        .as_deref()
+        .is_some_and(|source| source != context.model_source)
+    {
+        return Err("Requested model source differs from the resolved managed model".into());
     }
     if job_id.is_empty()
         || job_id.len() > 128
@@ -464,7 +510,7 @@ pub fn build(
     let configs = requested_difficulties(input)
         .into_iter()
         .map(|difficulty| ProductionInferenceConfig {
-            config_name: "v32",
+            config_name,
             difficulty_id: difficulty.id.trim().into(),
             difficulty_name: difficulty.name.trim().into(),
             gamemode: input.gamemode,
@@ -529,7 +575,9 @@ pub fn build(
         source_path: path_string(&source_path),
         source_commit: context.source_commit.clone(),
         model_path: path_string(&model_path),
+        model_id: input.model.clone(),
         model_version: context.model_version.clone(),
+        model_source: context.model_source.clone(),
         gpu_name: context.gpu_name.clone(),
         gpu_memory_total_mb: context.gpu_memory_total_mb,
         driver_version: context.driver_version.clone(),
@@ -606,6 +654,7 @@ mod tests {
             source_commit: "commit".into(),
             model_path,
             model_version: "32.test".into(),
+            model_source: "https://huggingface.co/OliBomby/Mapperatorinator-v32/tree/test".into(),
             device: "cuda".into(),
             precision: "fp16".into(),
             repair_generated_output: true,
@@ -627,6 +676,8 @@ mod tests {
         assert_eq!(command.gpu_name.as_deref(), Some("Fixture GPU"));
         assert_eq!(command.gpu_memory_total_mb, Some(8192));
         assert_eq!(command.driver_version.as_deref(), Some("999.0"));
+        assert_eq!(command.model_id, packages::STANDARD_MODEL_ID);
+        assert_eq!(command.model_source, context.model_source);
         assert!(Path::new(&command.audio_path).is_absolute());
         assert!(
             Path::new(&command.model_path)
@@ -651,19 +702,47 @@ mod tests {
     }
 
     #[test]
-    fn accepts_catalog_ids_but_blocks_new_models_until_their_worker_adapter_exists() {
-        let (root, mut input, context) = fixture();
+    fn routes_catalog_models_and_rejects_unsupported_controls() {
+        let (root, mut input, mut context) = fixture();
         input.model = "mapperatorinator-v30-standard".into();
-        validate_domain(&input).unwrap();
         assert!(
-            build("BF-v30", &input, &context)
+            validate_domain(&input)
                 .unwrap_err()
-                .contains("0.3-04")
+                .contains("target difficulty")
         );
+        input.difficulty = 0.0;
+        input.hitsounded = false;
+        input.descriptors.clear();
+        input.negative_descriptors.clear();
+        context.model_version = "30.test".into();
+        context.model_source =
+            "https://huggingface.co/OliBomby/Mapperatorinator-v30/tree/test".into();
+        let command = build("BF-v30", &input, &context).unwrap();
+        assert_eq!(command.config.config_name, "v30");
+        assert_eq!(command.model_id, input.model);
+        assert_eq!(command.model_source, context.model_source);
+
+        input.model = "mapperatorinator-v31-standard".into();
+        context.model_version = "31.test".into();
+        context.model_source =
+            "https://huggingface.co/OliBomby/Mapperatorinator-v31/tree/test".into();
+        let command = build("BF-v31", &input, &context).unwrap();
+        assert_eq!(command.config.config_name, "v31");
+
+        input.model = "mapperatorinator-v32-mini-standard".into();
+        input.difficulty = 4.5;
+        context.model_version = "32-mini.test".into();
+        context.model_source =
+            "https://huggingface.co/OliBomby/Mapperatorinator-v32-mini/tree/test".into();
+        let command = build("BF-v32-mini", &input, &context).unwrap();
+        assert_eq!(command.config.config_name, "v32-mini");
+
         input.model = "user-supplied-checkpoint".into();
         assert!(validate_domain(&input).unwrap_err().contains("Unknown"));
         input.model = packages::STANDARD_MODEL_ID.into();
         input.model_version = Some("32.unrelated".into());
+        context.model_source =
+            "https://huggingface.co/OliBomby/Mapperatorinator-v32/tree/test".into();
         assert!(
             build("BF-wrong-version", &input, &context)
                 .unwrap_err()

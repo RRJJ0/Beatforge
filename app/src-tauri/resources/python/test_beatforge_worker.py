@@ -7,6 +7,31 @@ import zipfile
 import beatforge_worker as worker
 
 
+class ModelIdentityTests(unittest.TestCase):
+    def test_each_pinned_model_routes_to_its_own_config(self):
+        for name in ("v30", "v31", "v32-mini", "v32"):
+            with self.subTest(name=name):
+                command = {
+                    "model_id": f"mapperatorinator-{name}-standard",
+                    "model_version": f"{name.removeprefix('v')}.test",
+                    "model_source": f"https://huggingface.co/OliBomby/Mapperatorinator-{name}/tree/test",
+                }
+                self.assertEqual(worker.resolve_model_identity(command)[-1], name)
+
+    def test_rejects_mismatched_model_source_and_version(self):
+        command = {
+            "model_id": "mapperatorinator-v31-standard",
+            "model_version": "30.test",
+            "model_source": "https://huggingface.co/OliBomby/Mapperatorinator-v31/tree/test",
+        }
+        with self.assertRaisesRegex(ValueError, "model_version"):
+            worker.resolve_model_identity(command)
+        command["model_version"] = "31.test"
+        command["model_source"] = "https://huggingface.co/OliBomby/Mapperatorinator-v30/tree/test"
+        with self.assertRaisesRegex(ValueError, "model_source"):
+            worker.resolve_model_identity(command)
+
+
 class BeatmapMetadataTests(unittest.TestCase):
     def test_negative_descriptors_enable_guidance_without_changing_other_jobs(self):
         ordinary = SimpleNamespace(cfg_scale=1.0)

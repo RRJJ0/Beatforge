@@ -11,7 +11,7 @@ use std::{
 };
 
 const WORKER_SOURCE: &str = include_str!("../resources/python/beatforge_worker.py");
-const WORKER_VERSION: &str = "15";
+const WORKER_VERSION: &str = "16";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 
@@ -30,7 +30,9 @@ pub struct WorkerHealth {
     pub ffmpeg_version: Option<String>,
     pub ffmpeg_executable: Option<String>,
     pub mapperatorinator_commit: Option<String>,
+    pub model_id: Option<String>,
     pub model_version: Option<String>,
+    pub model_source: Option<String>,
     pub model_path: Option<String>,
     pub errors: Vec<String>,
 }
@@ -178,7 +180,9 @@ pub fn health_check(
     source_path: &Path,
     source_commit: &str,
     model_path: Option<&Path>,
+    model_id: &str,
     model_version: &str,
+    model_source: &str,
     log_path: &Path,
 ) -> Result<WorkerHealth, String> {
     let command = serde_json::json!({
@@ -187,7 +191,9 @@ pub fn health_check(
         "source_path": source_path.to_string_lossy(),
         "source_commit": source_commit,
         "model_path": model_path.map(|path| path.to_string_lossy().into_owned()),
+        "model_id": model_id,
         "model_version": model_version,
+        "model_source": model_source,
     });
     let mut process = production_process(python, runtime_root)?;
     let mut child = process
@@ -275,11 +281,15 @@ mod tests {
     #[test]
     fn parses_versioned_health_message() {
         let health = parse_health(
-            r#"{"type":"health","protocol_version":2,"worker_version":"15","ready":true,"python_version":"3.10.21","python_executable":"python.exe","pytorch_version":"2.10.0","cuda_runtime":"13.0","cuda_available":true,"gpu_name":"GPU","ffmpeg_version":"7.0","ffmpeg_executable":"ffmpeg.exe","mapperatorinator_commit":"abc","model_version":"32.test","model_path":"model","errors":[]}"#,
+            r#"{"type":"health","protocol_version":2,"worker_version":"16","ready":true,"python_version":"3.10.21","python_executable":"python.exe","pytorch_version":"2.10.0","cuda_available":true,"gpu_name":"GPU","ffmpeg_version":"7.0","ffmpeg_executable":"ffmpeg.exe","mapperatorinator_commit":"abc","model_id":"mapperatorinator-v32-standard","model_version":"32.test","model_source":"https://huggingface.co/OliBomby/Mapperatorinator-v32/tree/test","model_path":"model","errors":[]}"#,
         )
         .unwrap();
         assert!(health.ready);
-        assert_eq!(health.worker_version, "15");
+        assert_eq!(health.worker_version, "16");
+        assert_eq!(
+            health.model_id.as_deref(),
+            Some("mapperatorinator-v32-standard")
+        );
     }
 
     #[test]
@@ -304,7 +314,7 @@ mod tests {
         assert!(WORKER_SOURCE.contains("inference.load_model_with_server("));
         assert!(WORKER_SOURCE.contains("inference.generate("));
         assert!(WORKER_SOURCE.contains("HF_HUB_OFFLINE"));
-        assert!(WORKER_SOURCE.contains("install_local_v32_backbone_config"));
+        assert!(WORKER_SOURCE.contains("install_local_backbone_config"));
         assert!(WORKER_SOURCE.contains("backbone_config"));
         assert!(
             WORKER_SOURCE
