@@ -424,10 +424,14 @@ onMounted(async () => {
             <span>{{ formatBytes(model.sizeBytes) }}</span
             ><span>osu!standard</span><span>{{ t('models.official') }}</span>
           </div>
-          <div v-if="modelBusy(model)" class="download-progress">
-            <NProgress type="line" :percentage="model.progress" :height="6" color="#ff66aa" /><span
-              >{{ runtimeStatusLabel(model.status) }} model package…</span
-            >
+          <div v-if="modelBusy(model)" class="download-progress" role="status" aria-live="polite">
+            <template v-if="model.acquisition === 'manual_import' && model.status === 'installing'">
+              <span>{{ t('models.importing') }}</span>
+            </template>
+            <template v-else>
+              <NProgress type="line" :percentage="model.progress" :height="6" color="#ff66aa" />
+              <span>{{ runtimeStatusLabel(model.status) }} model package…</span>
+            </template>
           </div>
         </div>
         <div class="model-action">

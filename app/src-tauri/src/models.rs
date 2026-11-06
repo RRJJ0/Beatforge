@@ -328,6 +328,8 @@ mod tests {
             b"expected"
         );
         assert!(verify_model(Path::new(&installed.path), &spec).is_ok());
+        fs::remove_dir_all(&source).unwrap();
+        assert!(verify_model(Path::new(&installed.path), &spec).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 

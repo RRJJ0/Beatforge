@@ -116,11 +116,17 @@ export const usePackagesStore = defineStore('packages', () => {
 
   async function importModel(packageId: string, sourcePath: string) {
     error.value = ''
+    const item = packages.value.find((candidate) => candidate.id === packageId)
+    if (item) {
+      item.status = 'installing'
+      item.progress = 0
+    }
     try {
       replace(await importModelPackage(packageId, sourcePath))
     } catch (reason) {
-      error.value = reason instanceof Error ? reason.message : String(reason)
+      const importError = reason instanceof Error ? reason.message : String(reason)
       await refresh()
+      error.value = importError
       throw reason
     }
   }
