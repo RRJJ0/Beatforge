@@ -15,7 +15,7 @@ import { useJobsStore } from '@/stores/jobs'
 import { useDesktopStore } from '@/stores/desktop'
 import JobPreviewModal from '@/components/JobPreviewModal.vue'
 import { useI18n } from '@/i18n'
-import type { BeatmapStatistics, GenerationJob } from '@/types'
+import type { BeatmapStatistics, BeatmapTimeAnalysis, GenerationJob } from '@/types'
 import {
   importDesktopJobOutput,
   importFailedDesktopJobOutput,
@@ -77,6 +77,16 @@ function durationSummary(milliseconds?: number | null) {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = String(totalSeconds % 60).padStart(2, '0')
   return `${minutes}:${seconds}`
+}
+
+function beatmapTime(milliseconds: number) {
+  const seconds = Math.floor(milliseconds / 1000)
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function binHeight(analysis: BeatmapTimeAnalysis, count: number) {
+  const maximum = Math.max(1, ...analysis.distribution.map((bin) => bin.objectCount))
+  return `${Math.max(5, (count / maximum) * 100)}%`
 }
 
 async function importFailedOutput(jobId: string, errorCount: number) {
@@ -161,12 +171,20 @@ function openPreview(jobId: string) {
               <strong>{{ job.title }}</strong
               ><span>{{ job.artist }} · {{ job.audioFile }}</span>
             </div>
-            <NTag size="small" round :type="statusType[job.status]">{{ t(`status.${job.status}` as 'status.completed') }}</NTag>
+            <NTag size="small" round :type="statusType[job.status]">{{
+              t(`status.${job.status}` as 'status.completed')
+            }}</NTag>
           </div>
           <div class="job-meta">
             <span class="mono">{{ job.id }}</span
             ><span>{{ job.model }}</span
-            ><span>{{ job.difficultyCount && job.difficultyCount > 1 ? t('jobs.difficultyCount', { count: job.difficultyCount }) : job.difficulty === 0 ? t('jobs.noTargetDifficulty') : `★ ${job.difficulty.toFixed(1)}` }}</span
+            ><span>{{
+              job.difficultyCount && job.difficultyCount > 1
+                ? t('jobs.difficultyCount', { count: job.difficultyCount })
+                : job.difficulty === 0
+                  ? t('jobs.noTargetDifficulty')
+                  : `★ ${job.difficulty.toFixed(1)}`
+            }}</span
             ><span>{{ job.createdAt }}</span>
           </div>
           <template v-if="['running', 'validating'].includes(job.status)">
@@ -208,7 +226,11 @@ function openPreview(jobId: string) {
               round
               :type="['completed', 'validated'].includes(item.status) ? 'success' : 'error'"
               :title="item.error"
-            >{{ item.name }} · {{ item.status.replaceAll('_', ' ') }}<template v-if="item.statistics"> · {{ objectCount(item.statistics) }} objects</template></NTag>
+              >{{ item.name }} · {{ item.status.replaceAll('_', ' ')
+              }}<template v-if="item.statistics">
+                · {{ objectCount(item.statistics) }} objects</template
+              ></NTag
+            >
           </div>
           <div v-if="job.validationReport" class="job-validation">
             <span>{{ job.validationReport.status.replaceAll('_', ' ') }}</span>
@@ -235,6 +257,64 @@ function openPreview(jobId: string) {
               ★ {{ job.validationReport.statistics.starRating.toFixed(2) }}
             </span>
           </div>
+          <details v-if="job.validationReport?.timeAnalysis?.length" class="job-time-analysis">
+            <summary>{{ t('jobs.timeAnalysis') }}</summary>
+            <div
+              v-for="analysis in job.validationReport.timeAnalysis"
+              :key="`${analysis.stage}:${analysis.beatmap}`"
+              class="time-map"
+            >
+              <strong>{{ analysis.beatmap }} · {{ t(`jobs.analysis.${analysis.stage}`) }}</strong>
+              <small
+                v-if="analysis.longGapCount || analysis.simultaneousClusterCount"
+                class="time-counts"
+              >
+                {{
+                  t('jobs.qualityCounts', {
+                    gaps: analysis.longGapCount,
+                    clusters: analysis.simultaneousClusterCount,
+                  })
+                }}
+              </small>
+              <div class="time-bins" :aria-label="t('jobs.distribution')">
+                <span
+                  v-for="bin in analysis.distribution"
+                  :key="bin.startMs"
+                  class="time-bin"
+                  :style="{ height: binHeight(analysis, bin.objectCount) }"
+                  :title="`${beatmapTime(bin.startMs)}–${beatmapTime(bin.endMs)}: ${bin.objectCount}`"
+                />
+              </div>
+              <p v-for="gap in analysis.longGaps" :key="`gap:${gap.startMs}`" class="time-warning">
+                {{
+                  t('jobs.longGap', {
+                    start: beatmapTime(gap.startMs),
+                    end: beatmapTime(gap.endMs),
+                  })
+                }}
+              </p>
+              <p
+                v-for="cluster in analysis.simultaneousClusters"
+                :key="`cluster:${cluster.startMs}`"
+                class="time-warning"
+              >
+                {{
+                  t('jobs.simultaneousCluster', {
+                    count: cluster.objectCount,
+                    time: beatmapTime(cluster.startMs),
+                  })
+                }}
+              </p>
+              <small
+                v-if="
+                  analysis.longGapCount > analysis.longGaps.length ||
+                  analysis.simultaneousClusterCount > analysis.simultaneousClusters.length
+                "
+              >
+                {{ t('jobs.rangesLimited') }}
+              </small>
+            </div>
+          </details>
         </div>
         <div class="job-actions">
           <NButton
@@ -446,6 +526,40 @@ function openPreview(jobId: string) {
   margin-top: 7px;
   color: #b4bac8;
   font-size: 9px;
+}
+.job-time-analysis {
+  margin-top: 9px;
+  color: #b4bac8;
+  font-size: 10px;
+}
+.job-time-analysis summary {
+  cursor: pointer;
+  color: #ff96c3;
+}
+.time-map {
+  margin: 9px 0;
+}
+.time-counts {
+  display: block;
+  margin-top: 2px;
+}
+.time-bins {
+  display: flex;
+  align-items: end;
+  gap: 2px;
+  height: 30px;
+  margin-top: 5px;
+  overflow: hidden;
+}
+.time-bin {
+  flex: 1 0 2px;
+  max-width: 12px;
+  min-width: 2px;
+  background: #ff66aa;
+}
+.time-warning {
+  margin: 5px 0 0;
+  color: #f2bb74;
 }
 .job-actions {
   display: grid;

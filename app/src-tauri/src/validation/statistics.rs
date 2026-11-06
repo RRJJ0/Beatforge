@@ -7,7 +7,7 @@ use crate::validation::{
 };
 use std::path::Path;
 
-fn slider_end_time(
+pub(crate) fn slider_end_time(
     start_time_ms: u64,
     repeats: u32,
     pixel_length: f64,

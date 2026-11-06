@@ -122,6 +122,12 @@ Phase 6.7 calculates report statistics only from a candidate that has passed ful
 
 Archive reports sum object and beatmap counts, combine the BPM range, and use the longest difficulty duration. Statistics are omitted for invalid output. `maxCombo` and `starRating` remain nullable and are intentionally unset until Beatforge integrates a reviewed calculator matching the target osu! ruleset; object count or a local approximation must not be mislabeled as either value.
 
+## Time distribution and quality review
+
+Validator version 2 adds `timeAnalysis` to new reports; older reports deserialize with an empty list. For each valid `.osu` in a raw or validated artifact, the report records per-beatmap object-start counts in bins at least 10 seconds wide (at most 720 bins). It also records interior intervals of at least 15 seconds without an active hit object, using the preceding object's end where known, and timestamps with at least three object starts. The known 6s regression at 1:14.287–1:34.349 is covered by a synthetic fixture with those timestamps.
+
+Analysis is observational: only the validated artifact creates `LONG_OBJECT_GAP` and `SIMULTANEOUS_OBJECT_CLUSTER` warnings. A long musical break or a stack can be intentional, so these warnings never fail validation or alter hit objects. The report keeps total counts and at most 50 longest gaps and 50 largest clusters per beatmap; validation issues show at most 10 ranges of each kind. The Jobs view exposes raw and validated distributions and review intervals. Invalid outputs have no time analysis.
+
 ## Operating-system delivery boundary
 
 Phase 6.8 never accepts an artifact path from the UI. The normal job-id command reloads the SQLite record and requires `completed`, a completable report with matching job identity, one `validated/<filename>` relative path, a matching stored output path, a regular non-symlink file, and canonical containment directly beneath the managed validated directory. Only `.osu` and `.osz` may cross this boundary.

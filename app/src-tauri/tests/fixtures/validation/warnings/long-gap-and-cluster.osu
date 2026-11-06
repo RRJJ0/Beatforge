@@ -1,0 +1,30 @@
+osu file format v14
+
+[General]
+AudioFilename: fixture.wav
+Mode: 0
+
+[Metadata]
+Title:Known Gap Regression
+Artist:Beatforge
+Creator:Beatforge Tests
+Version:6s
+
+[Difficulty]
+HPDrainRate:5
+CircleSize:4
+OverallDifficulty:8
+ApproachRate:9
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[TimingPoints]
+0,500,4,2,1,70,1,0
+
+[HitObjects]
+256,192,70000,1,0,0:0:0:0:
+128,192,74287,1,0,0:0:0:0:
+256,192,74287,1,0,0:0:0:0:
+384,192,74287,1,0,0:0:0:0:
+256,192,94349,1,0,0:0:0:0:
+256,192,95000,1,0,0:0:0:0:

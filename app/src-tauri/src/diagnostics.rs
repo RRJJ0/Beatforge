@@ -706,6 +706,7 @@ mod tests {
                 repairable: false,
             }],
             statistics: None,
+            time_analysis: vec![],
             repairs: vec![],
             started_at: "2026-10-15T00:00:00Z".into(),
             completed_at: "2026-10-15T00:00:01Z".into(),

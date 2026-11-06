@@ -68,6 +68,23 @@ export interface BeatmapStatistics {
   durationMs?: number | null
 }
 
+export interface TimeRange {
+  startMs: number
+  endMs: number
+  objectCount: number
+}
+
+export interface BeatmapTimeAnalysis {
+  beatmap: string
+  stage: 'raw' | 'validated'
+  binWidthMs: number
+  distribution: TimeRange[]
+  longGaps: TimeRange[]
+  simultaneousClusters: TimeRange[]
+  longGapCount: number
+  simultaneousClusterCount: number
+}
+
 export interface RepairRecord {
   code: string
   section?: string | null
@@ -86,6 +103,7 @@ export interface ValidationReport {
   validatedPath?: string | null
   issues: ValidationIssue[]
   statistics?: BeatmapStatistics | null
+  timeAnalysis?: BeatmapTimeAnalysis[]
   repairs: RepairRecord[]
   startedAt: string
   completedAt: string

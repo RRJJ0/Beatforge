@@ -8,6 +8,7 @@ pub mod archive;
 pub mod limits;
 pub mod osu;
 pub mod pipeline;
+pub mod quality;
 pub mod repair;
 pub mod statistics;
 pub mod types;
@@ -26,8 +27,8 @@ pub use statistics::{
     calculate_file_statistics,
 };
 pub use types::{
-    BeatmapStatistics, IssueSeverity, RepairManifest, RepairManifestStatus, RepairRecord,
-    ValidationCode, ValidationIssue, ValidationReport, ValidationStatus,
+    BeatmapStatistics, BeatmapTimeAnalysis, IssueSeverity, RepairManifest, RepairManifestStatus,
+    RepairRecord, TimeRange, ValidationCode, ValidationIssue, ValidationReport, ValidationStatus,
 };
 
 #[cfg(test)]

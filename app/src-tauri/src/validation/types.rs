@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const VALIDATION_SCHEMA_VERSION: u16 = 1;
-pub const VALIDATOR_VERSION: &str = "1";
+pub const VALIDATOR_VERSION: &str = "2";
 pub const REPAIR_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +50,8 @@ pub enum ValidationCode {
     MetadataIncomplete,
     WorkerWarning,
     AutoRepairApplied,
+    LongObjectGap,
+    SimultaneousObjectCluster,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +77,27 @@ pub struct BeatmapStatistics {
     pub bpm_min: Option<f64>,
     pub bpm_max: Option<f64>,
     pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeRange {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub object_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatmapTimeAnalysis {
+    pub beatmap: String,
+    pub stage: String,
+    pub bin_width_ms: u64,
+    pub distribution: Vec<TimeRange>,
+    pub long_gaps: Vec<TimeRange>,
+    pub simultaneous_clusters: Vec<TimeRange>,
+    pub long_gap_count: u32,
+    pub simultaneous_cluster_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +141,8 @@ pub struct ValidationReport {
     pub validated_path: Option<String>,
     pub issues: Vec<ValidationIssue>,
     pub statistics: Option<BeatmapStatistics>,
+    #[serde(default)]
+    pub time_analysis: Vec<BeatmapTimeAnalysis>,
     pub repairs: Vec<RepairRecord>,
     pub started_at: String,
     pub completed_at: String,
@@ -162,6 +187,7 @@ mod tests {
                 repairable: true,
             }],
             statistics: None,
+            time_analysis: vec![],
             repairs: vec![],
             started_at: "2026-10-06T00:00:00Z".into(),
             completed_at: "2026-10-06T00:00:01Z".into(),
@@ -180,7 +206,17 @@ mod tests {
         assert_eq!(value["status"], "valid_with_warnings");
         assert_eq!(value["issues"][0]["code"], "METADATA_INCOMPLETE");
         assert_eq!(value["issues"][0]["severity"], "warning");
+        assert_eq!(value["timeAnalysis"], serde_json::json!([]));
         assert!(value.get("source_path").is_none());
+    }
+
+    #[test]
+    fn older_reports_without_time_analysis_still_load() {
+        let mut value =
+            serde_json::to_value(report(ValidationStatus::Valid, IssueSeverity::Info)).unwrap();
+        value.as_object_mut().unwrap().remove("timeAnalysis");
+        let loaded: ValidationReport = serde_json::from_value(value).unwrap();
+        assert!(loaded.time_analysis.is_empty());
     }
 
     #[test]

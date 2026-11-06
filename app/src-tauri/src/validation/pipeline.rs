@@ -1,12 +1,14 @@
 use crate::validation::{
-    BeatmapStatistics, IssueSeverity, RepairManifest, RepairManifestStatus, RepairRecord,
-    ValidationCode, ValidationIssue, ValidationLimits, ValidationReport, ValidationStatus,
+    BeatmapStatistics, BeatmapTimeAnalysis, IssueSeverity, RepairManifest, RepairManifestStatus,
+    RepairRecord, ValidationCode, ValidationIssue, ValidationLimits, ValidationReport,
+    ValidationStatus,
     archive::{extract_osz, package_osz_from_directory},
     limits::{
         RAW_DIRECTORY, REPAIR_MANIFEST_FILE, VALIDATED_DIRECTORY, VALIDATION_REPORT_FILE,
         WORKING_DIRECTORY,
     },
     osu::{SemanticValidationContext, parse_osu_file, validate_semantics},
+    quality::{analyze_file, quality_issues},
     repair::{normalize_osu_bytes, repair_extracted_archive},
     statistics::{calculate_archive_statistics, calculate_file_statistics},
     types::{REPAIR_MANIFEST_SCHEMA_VERSION, VALIDATION_SCHEMA_VERSION, VALIDATOR_VERSION},
@@ -271,6 +273,45 @@ fn contains_errors(issues: &[ValidationIssue]) -> bool {
         .any(|item| item.severity == IssueSeverity::Error)
 }
 
+fn analyze_artifact_time(
+    job_root: &Path,
+    artifact: &Path,
+    stage: &str,
+    limits: ValidationLimits,
+) -> Vec<BeatmapTimeAnalysis> {
+    let extension = artifact.extension().and_then(|value| value.to_str());
+    if extension.is_some_and(|value| value.eq_ignore_ascii_case("osu")) {
+        let name = artifact.file_name().unwrap_or_default().to_string_lossy();
+        return analyze_file(artifact, &name, stage, limits)
+            .into_iter()
+            .collect();
+    }
+    if !extension.is_some_and(|value| value.eq_ignore_ascii_case("osz")) {
+        return Vec::new();
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let work = job_root.join(format!(
+        "time-analysis-{stage}-{}-{nonce}",
+        std::process::id()
+    ));
+    let extracted = extract_osz(artifact, &work, limits);
+    let analyses = extracted.value.map_or_else(Vec::new, |extracted| {
+        extracted
+            .inspection
+            .beatmap_paths
+            .iter()
+            .filter_map(|relative| {
+                analyze_file(&extracted.root.join(relative), relative, stage, limits)
+            })
+            .collect()
+    });
+    let _ = fs::remove_dir_all(work);
+    analyses
+}
+
 fn validate_and_repair_osu(
     job_root: &Path,
     raw_path: &Path,
@@ -523,6 +564,21 @@ pub fn validate_candidate_with_delivery_name(
         ),
     };
 
+    let mut time_analysis = Vec::new();
+    if let Some(validated) = artifact.validated_path.as_deref() {
+        time_analysis.extend(analyze_artifact_time(
+            job_root,
+            &job_root.join(RAW_DIRECTORY).join(&name),
+            "raw",
+            limits,
+        ));
+        let validated_analysis =
+            analyze_artifact_time(job_root, &job_root.join(validated), "validated", limits);
+        for analysis in &validated_analysis {
+            artifact.issues.extend(quality_issues(analysis));
+        }
+        time_analysis.extend(validated_analysis);
+    }
     artifact
         .issues
         .extend(worker_warnings.iter().map(|message| ValidationIssue {
@@ -593,6 +649,7 @@ pub fn validate_candidate_with_delivery_name(
         } else {
             artifact.statistics
         },
+        time_analysis,
         repairs: artifact.repairs,
         started_at,
         completed_at: utc_now(),
@@ -712,6 +769,69 @@ mod tests {
 
         assert!(report.can_complete());
         assert_eq!(report.statistics.unwrap().beatmap_count, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn known_gap_is_reported_for_raw_and_validated_without_rejecting_the_map() {
+        let root = temporary_job("known-gap");
+        let candidate = root.join("known-gap.osu");
+        fs::copy(fixture("warnings/long-gap-and-cluster.osu"), &candidate).unwrap();
+
+        let report = validate_candidate(
+            "BF-KNOWN-GAP",
+            &root,
+            &candidate,
+            &[],
+            ValidationLimits::default(),
+        )
+        .unwrap();
+
+        assert!(report.can_complete());
+        assert_eq!(report.status, ValidationStatus::ValidWithWarnings);
+        assert_eq!(report.time_analysis.len(), 2);
+        assert_eq!(report.time_analysis[0].stage, "raw");
+        assert_eq!(report.time_analysis[1].stage, "validated");
+        assert_eq!(report.time_analysis[1].long_gaps[0].start_ms, 74_287);
+        assert_eq!(report.time_analysis[1].long_gaps[0].end_ms, 94_349);
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|item| item.code == ValidationCode::LongObjectGap)
+        );
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|item| item.code == ValidationCode::SimultaneousObjectCluster)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn archive_time_analysis_keeps_beatmap_identity() {
+        let root = temporary_job("archive-quality");
+        let candidate = root.join("set.osz");
+        let map = fs::read(fixture("warnings/long-gap-and-cluster.osu")).unwrap();
+        write_osz(
+            &candidate,
+            &[("difficulty-1.osu", &map), ("fixture.wav", b"audio")],
+        );
+
+        let report = validate_candidate(
+            "BF-ARCHIVE-QUALITY",
+            &root,
+            &candidate,
+            &[],
+            ValidationLimits::default(),
+        )
+        .unwrap();
+
+        assert!(report.can_complete());
+        assert_eq!(report.time_analysis.len(), 2);
+        assert_eq!(report.time_analysis[1].beatmap, "difficulty-1.osu");
+        assert_eq!(report.time_analysis[1].long_gap_count, 1);
         fs::remove_dir_all(root).unwrap();
     }
 

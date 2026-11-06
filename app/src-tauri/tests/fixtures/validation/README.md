@@ -4,6 +4,7 @@ These fixtures are intentionally tiny, artificial, and free of user music or gen
 
 - `valid/` contains the minimum osu!standard structure accepted by the phase 6 contract.
 - `warnings/` contains parseable maps that should complete with explicit warnings.
+- `warnings/long-gap-and-cluster.osu` is a synthetic regression for the reported 6s gap at 1:14.287–1:34.349; it contains no user beatmap content.
 - `invalid/` contains deterministic structural or semantic failures.
 - `hostile/archive-cases.json` contains recipes for generating unsafe ZIP entries in a test-owned temporary directory.
 

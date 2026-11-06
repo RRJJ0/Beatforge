@@ -627,6 +627,7 @@ mod tests {
                 repairable: true,
             }],
             statistics: None,
+            time_analysis: vec![],
             repairs: Vec::new(),
             started_at: "2026-10-07T00:00:00Z".into(),
             completed_at: "2026-10-07T00:00:01Z".into(),
