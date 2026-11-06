@@ -32,6 +32,8 @@ import {
   authorizeBackgroundPreview,
   inspectBeatmapVideo,
   isDesktopRuntime,
+  OFFICIAL_DESCRIPTOR_TAGS_URL,
+  openOfficialDescriptorTags,
   selectAudioFile,
   selectBackgroundImage,
   selectBeatmapFile,
@@ -56,6 +58,7 @@ const artistUnicode = ref('')
 const songSource = ref('')
 const tags = ref<string[]>([])
 const model = ref('mapperatorinator-v32-standard')
+const descriptorExamples = ['skillset/streams', 'skillset/jumps', 'style/clean']
 const isAdvanced = ref(false)
 const attempted = ref(false)
 const creating = ref(false)
@@ -244,6 +247,25 @@ async function chooseAudio() {
   audioFile.value = selected
   const fileName = selected.split(/[\\/]/).at(-1) ?? selected
   if (!title.value) title.value = fileName.replace(/\.[^/.]+$/, '').replaceAll('-', ' ')
+}
+
+async function openDescriptorList(event: MouseEvent) {
+  if (!desktop) return
+  event.preventDefault()
+  try {
+    await openOfficialDescriptorTags()
+  } catch {
+    message.error(t('generate.descriptorLinkFailed'))
+  }
+}
+
+async function copyDescriptorExample(tag: string) {
+  try {
+    await navigator.clipboard.writeText(tag)
+    message.success(t('generate.descriptorCopied', { tag }))
+  } catch {
+    message.error(t('generate.descriptorCopyFailed'))
+  }
 }
 
 async function chooseReferenceBeatmap() {
@@ -710,6 +732,28 @@ watch(model, () => {
               <NFormItem :label="t('generate.negative')" :feedback="t('generate.negativeHelp')"
                 ><NDynamicTags v-model:value="selectedDifficulty.negativeDescriptors"
               /></NFormItem>
+            </div>
+            <div v-if="modelCapabilities?.descriptors" class="descriptor-guide">
+              <p>{{ t('generate.descriptorGuide') }}</p>
+              <a
+                :href="OFFICIAL_DESCRIPTOR_TAGS_URL"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click="openDescriptorList"
+                >{{ t('generate.descriptorList') }}</a
+              >
+              <div class="descriptor-examples">
+                <span>{{ t('generate.descriptorExamples') }}</span>
+                <NButton
+                  v-for="tag in descriptorExamples"
+                  :key="tag"
+                  size="tiny"
+                  secondary
+                  :aria-label="t('generate.copyDescriptor', { tag })"
+                  @click="copyDescriptorExample(tag)"
+                  ><code>{{ tag }}</code></NButton
+                >
+              </div>
             </div>
 
             <button
@@ -1406,6 +1450,36 @@ watch(model, () => {
 .editor-basics,
 .descriptor-grid {
   gap: 16px;
+}
+.descriptor-guide {
+  padding: 10px 12px;
+  margin: -3px 0 14px;
+  border: 1px solid rgba(127, 127, 127, 0.18);
+  border-radius: 9px;
+  font-size: 10px;
+}
+.descriptor-guide p {
+  margin: 0 0 7px;
+  color: #9aa2b2;
+}
+.descriptor-guide a {
+  color: #ff66aa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.descriptor-guide a:focus-visible {
+  outline: 2px solid #ff66aa;
+  outline-offset: 3px;
+}
+.descriptor-examples {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.descriptor-examples code {
+  font-size: 10px;
 }
 .difficulty-editor :deep(.n-form-item) {
   margin-bottom: 12px;

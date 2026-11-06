@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import type {
   AppPaths,
   AppSettings,
@@ -31,6 +32,12 @@ import type {
 
 export function isDesktopRuntime() {
   return '__TAURI_INTERNALS__' in window
+}
+
+export const OFFICIAL_DESCRIPTOR_TAGS_URL = 'https://osu.ppy.sh/wiki/en/Beatmap/Beatmap_tags'
+
+export function openOfficialDescriptorTags() {
+  return openUrl(OFFICIAL_DESCRIPTOR_TAGS_URL)
 }
 
 export async function selectAudioFile(): Promise<string | null> {
