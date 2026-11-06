@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NAlert,
@@ -27,6 +27,7 @@ import {
   VideocamOutline,
 } from '@vicons/ionicons5'
 import { useJobsStore } from '@/stores/jobs'
+import { usePackagesStore } from '@/stores/packages'
 import {
   authorizeBackgroundPreview,
   inspectBeatmapVideo,
@@ -38,10 +39,13 @@ import {
 } from '@/services/desktop'
 import { useI18n } from '@/i18n'
 import { publicTags, validNumber, validTags, validText } from '@/utils/generateDraft'
+import { capabilitiesForModel, supportedDifficulty } from '@/utils/modelCapabilities'
+import type { ManagedPackage } from '@/types'
 
 const router = useRouter()
 const message = useMessage()
 const jobsStore = useJobsStore()
+const packageStore = usePackagesStore()
 const { t } = useI18n()
 const audioFile = ref('')
 const title = ref('')
@@ -111,9 +115,64 @@ const selectedDifficulty = computed(
     difficulties.value[0]!,
 )
 
-const modelOptions = [
-  { label: 'Mapperatorinator V32 · osu!standard', value: 'mapperatorinator-v32-standard' },
-]
+const desktop = isDesktopRuntime()
+function modelStatusLabel(item: ManagedPackage) {
+  if (
+    item.status === 'installed' &&
+    item.installedVersion === item.targetVersion &&
+    item.installPath
+  ) {
+    return t('models.installed')
+  }
+  if (item.status === 'installed' && !item.installPath) return t('models.repair')
+  if (item.status === 'update_available' || item.status === 'installed') return t('models.update')
+  if (item.status === 'failed') return t('models.repair')
+  if (item.status === 'downloaded') return t('generate.modelNeedsInstall')
+  if (['queued', 'downloading', 'verifying', 'installing', 'removing'].includes(item.status)) {
+    return t('generate.modelBusy')
+  }
+  return t('models.missing')
+}
+const modelOptions = computed(() =>
+  desktop
+    ? packageStore.models.map((item) => ({
+        label: `${item.name} · ${modelStatusLabel(item)}`,
+        value: item.id,
+      }))
+    : [{ label: 'Mapperatorinator V32 · osu!standard', value: 'mapperatorinator-v32-standard' }],
+)
+const selectedPackage = computed(() => packageStore.models.find((item) => item.id === model.value))
+const modelCapabilities = computed(() => capabilitiesForModel(model.value))
+const modelReady = computed(
+  () =>
+    !desktop ||
+    (selectedPackage.value?.status === 'installed' &&
+      selectedPackage.value.installedVersion === selectedPackage.value.targetVersion &&
+      Boolean(selectedPackage.value.installPath)),
+)
+const modelStatus = computed(() => {
+  if (!desktop) return t('common.ready')
+  if (!selectedPackage.value) return t('common.checking')
+  return modelStatusLabel(selectedPackage.value)
+})
+const modelCapabilityNotes = computed(() => {
+  const capabilities = modelCapabilities.value
+  if (!capabilities) return []
+  return [
+    capabilities.targetDifficulty
+      ? t('generate.capabilityTarget')
+      : t('generate.capabilityNoTarget'),
+    capabilities.descriptors
+      ? t('generate.capabilityDescriptors')
+      : t('generate.capabilityNoDescriptors'),
+    capabilities.hitsounded
+      ? t('generate.capabilityHitsounds')
+      : t('generate.capabilityNoHitsounds'),
+    capabilities.referenceTiming
+      ? t('generate.capabilityReference')
+      : t('generate.capabilityNoReference'),
+  ]
+})
 const scenarioOptions = [
   { label: 'Production inference', value: 'success' },
   { label: 'Simulate generation failure', value: 'failure' },
@@ -141,6 +200,8 @@ const effectivePublicTags = computed(() => publicTags(tags.value))
 const canGenerate = computed(() =>
   Boolean(
     audioFile.value &&
+    modelCapabilities.value &&
+    modelReady.value &&
     validText(title.value, true) &&
     validText(artist.value, true) &&
     validV020.value &&
@@ -156,6 +217,8 @@ const referenceDisplayName = computed(() => referenceBeatmap.value.split(/[\\/]/
 function addDifficulty() {
   const previous = difficulties.value.at(-1)?.difficulty ?? 3.8
   const difficulty = makeDifficulty(Math.min(8, Number((previous + 0.8).toFixed(1))))
+  if (!modelCapabilities.value?.targetDifficulty)
+    difficulty.name = `AI ${difficulties.value.length + 1}`
   difficulties.value.push(difficulty)
   selectedDifficultyId.value = difficulty.id
 }
@@ -237,6 +300,10 @@ function clearVideo() {
 
 async function createJob() {
   attempted.value = true
+  if (!modelCapabilities.value || !modelReady.value) {
+    message.warning(t('generate.modelRequired'))
+    return
+  }
   if (!validV020.value) {
     if (
       difficulties.value.some(
@@ -259,6 +326,11 @@ async function createJob() {
   creating.value = true
   try {
     const primary = difficulties.value[0]!
+    const capabilities = modelCapabilities.value
+    const requestDifficulties = difficulties.value.map((item) =>
+      supportedDifficulty({ ...item, name: item.name.trim() }, capabilities),
+    )
+    const requestPrimary = requestDifficulties[0]!
     await jobsStore.createJob({
       requestSchemaVersion: 2,
       title: title.value.trim(),
@@ -270,22 +342,23 @@ async function createJob() {
       tags: tags.value.map((tag) => tag.trim()),
       audioFile: audioFile.value,
       model: model.value,
-      difficulty: primary.difficulty,
-      difficulties: difficulties.value.map((item) => ({
-        ...item,
-        name: item.name.trim(),
-      })),
+      modelVersion: selectedPackage.value?.targetVersion,
+      modelSource: selectedPackage.value?.sourceUrl,
+      difficulty: requestPrimary.difficulty,
+      difficulties: requestDifficulties,
       gamemode: 0,
       seed: primary.seed,
-      descriptors: primary.descriptors,
-      negativeDescriptors: primary.negativeDescriptors,
-      referenceBeatmap: referenceBeatmap.value || undefined,
+      descriptors: requestPrimary.descriptors,
+      negativeDescriptors: requestPrimary.negativeDescriptors,
+      referenceBeatmap: capabilities.referenceTiming
+        ? referenceBeatmap.value || undefined
+        : undefined,
       backgroundImage: backgroundImage.value || undefined,
       videoFile: videoFile.value || undefined,
       videoStartTimeMs: videoStartTimeMs.value ?? 0,
       approachRate: primary.approachRate,
       circleSize: primary.circleSize,
-      hitsounded: primary.hitsounded,
+      hitsounded: requestPrimary.hitsounded,
       scenario: scenario.value,
     })
     message.success(t('generate.queued'))
@@ -296,6 +369,19 @@ async function createJob() {
     creating.value = false
   }
 }
+
+onMounted(() => {
+  void packageStore.initialize().catch((reason) => {
+    message.error(String(reason))
+  })
+})
+
+watch(model, () => {
+  if (modelCapabilities.value?.targetDifficulty) return
+  difficulties.value.forEach((item, index) => {
+    if (/^AI \d(?:\.\d)?s$/.test(item.name)) item.name = `AI ${index + 1}`
+  })
+})
 </script>
 
 <template>
@@ -421,7 +507,7 @@ async function createJob() {
       </div>
 
       <div class="asset-grid">
-        <div class="asset-item">
+        <div v-if="modelCapabilities?.referenceTiming" class="asset-item">
           <div class="asset-copy">
             <NIcon :component="DocumentAttachOutline" />
             <span
@@ -504,8 +590,33 @@ async function createJob() {
         </div>
         <div class="model-field">
           <span>{{ t('generate.model') }}</span>
-          <NSelect v-model:value="model" :options="modelOptions" />
+          <NSelect
+            v-model:value="model"
+            :options="modelOptions"
+            :aria-label="t('generate.model')"
+          />
         </div>
+      </div>
+
+      <div class="model-details" aria-live="polite">
+        <div class="model-details-heading">
+          <strong>{{ selectedPackage?.name ?? t('generate.model') }}</strong>
+          <NTag size="small" :type="modelReady ? 'success' : 'warning'">{{ modelStatus }}</NTag>
+          <NTag v-if="selectedPackage" size="small">v{{ selectedPackage.targetVersion }}</NTag>
+        </div>
+        <p>{{ t('generate.modelCapabilities') }}</p>
+        <ul>
+          <li v-for="note in modelCapabilityNotes" :key="note">{{ note }}</li>
+        </ul>
+        <NAlert v-if="desktop && !modelReady" type="warning" :show-icon="false">
+          {{ t('generate.modelRequired') }}
+          <NButton text type="primary" @click="router.push('/models')">{{
+            t('generate.manageModels')
+          }}</NButton>
+        </NAlert>
+        <p v-if="selectedPackage?.acquisition === 'manual_import'" class="model-caveat">
+          {{ t('generate.manualModelCaveat') }}
+        </p>
       </div>
 
       <div class="difficulty-workspace">
@@ -539,8 +650,10 @@ async function createJob() {
                   item.name || t('generate.difficultyNumber', { number: index + 1 })
                 }}</span>
                 <small
-                  >{{ item.difficulty.toFixed(1) }}★ · AR {{ item.approachRate }} · CS
-                  {{ item.circleSize }} · Seed {{ item.seed }}</small
+                  >{{
+                    modelCapabilities?.targetDifficulty ? `${item.difficulty.toFixed(1)}★ · ` : ''
+                  }}AR {{ item.approachRate }} · CS {{ item.circleSize }} · Seed
+                  {{ item.seed }}</small
                 >
               </button>
               <NButton
@@ -569,7 +682,7 @@ async function createJob() {
               <NFormItem :label="t('generate.difficultyName')">
                 <NInput v-model:value="selectedDifficulty.name" maxlength="200" />
               </NFormItem>
-              <NFormItem :label="t('generate.rating')">
+              <NFormItem v-if="modelCapabilities?.targetDifficulty" :label="t('generate.rating')">
                 <div class="slider-field">
                   <NSlider
                     v-model:value="selectedDifficulty.difficulty"
@@ -586,8 +699,11 @@ async function createJob() {
                   />
                 </div>
               </NFormItem>
+              <NAlert v-else type="info" :show-icon="false" class="no-target-note">
+                {{ t('generate.noTargetHelp') }}
+              </NAlert>
             </div>
-            <div class="two-column descriptor-grid">
+            <div v-if="modelCapabilities?.descriptors" class="two-column descriptor-grid">
               <NFormItem :label="t('generate.descriptors')"
                 ><NDynamicTags v-model:value="selectedDifficulty.descriptors"
               /></NFormItem>
@@ -609,7 +725,10 @@ async function createJob() {
                     seed: selectedDifficulty.seed,
                     ar: selectedDifficulty.approachRate,
                     cs: selectedDifficulty.circleSize,
-                    hitsounds: selectedDifficulty.hitsounded ? t('common.on') : t('common.off'),
+                    hitsounds:
+                      modelCapabilities?.hitsounded && selectedDifficulty.hitsounded
+                        ? t('common.on')
+                        : t('common.off'),
                   })
                 }}</small></span
               >
@@ -727,7 +846,7 @@ async function createJob() {
                     :aria-label="t('generate.sliderTickRate')"
                   />
                 </NFormItem>
-                <div class="switch-row nested">
+                <div v-if="modelCapabilities?.hitsounded" class="switch-row nested">
                   <div>
                     <strong>{{ t('generate.hitsounds') }}</strong
                     ><small>{{ t('generate.hitsoundsHelp') }}</small>
@@ -761,9 +880,10 @@ async function createJob() {
         </p>
         <ul>
           <li v-for="item in difficulties" :key="item.id">
-            {{ item.name }} · {{ item.difficulty.toFixed(1) }}★ · AR {{ item.approachRate }} · CS
-            {{ item.circleSize }} · HP {{ item.hpDrainRate ?? '—' }} · OD
-            {{ item.overallDifficulty ?? '—' }} · SV {{ item.sliderMultiplier ?? '—' }} · Tick
+            {{ item.name }} ·
+            {{ modelCapabilities?.targetDifficulty ? `${item.difficulty.toFixed(1)}★ · ` : '' }}AR
+            {{ item.approachRate }} · CS {{ item.circleSize }} · HP {{ item.hpDrainRate ?? '—' }} ·
+            OD {{ item.overallDifficulty ?? '—' }} · SV {{ item.sliderMultiplier ?? '—' }} · Tick
             {{ item.sliderTickRate ?? '—' }}
           </li>
         </ul>
@@ -774,7 +894,13 @@ async function createJob() {
           <strong>{{ t('generate.readySummary', { count: difficulties.length }) }}</strong>
           <span><NIcon :component="PlayOutline" />{{ t('generate.estimate') }}</span>
         </div>
-        <NButton type="primary" size="large" :loading="creating" @click="createJob">
+        <NButton
+          type="primary"
+          size="large"
+          :loading="creating"
+          :disabled="desktop && !modelReady"
+          @click="createJob"
+        >
           <template #icon><NIcon :component="SparklesOutline" /></template
           >{{ t('generate.actionCount', { count: difficulties.length }) }}
         </NButton>
@@ -1137,6 +1263,45 @@ async function createJob() {
   color: #9aa2b2;
   font-size: 11px;
   font-weight: 700;
+}
+.model-details {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(127, 127, 127, 0.18);
+  border-radius: 12px;
+  background: rgba(127, 127, 127, 0.035);
+}
+.model-details-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+.model-details p {
+  margin: 8px 0 5px;
+  color: #858da0;
+  font-size: 10px;
+}
+.model-details ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 0;
+  margin: 0 0 9px;
+  list-style: none;
+  font-size: 10px;
+}
+.model-details li::before {
+  content: '•';
+  margin-right: 5px;
+  color: #ff66aa;
+}
+.model-details .model-caveat {
+  margin-bottom: 0;
+}
+.no-target-note {
+  align-self: center;
 }
 .difficulty-workspace {
   display: grid;

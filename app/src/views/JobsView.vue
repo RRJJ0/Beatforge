@@ -166,7 +166,7 @@ function openPreview(jobId: string) {
           <div class="job-meta">
             <span class="mono">{{ job.id }}</span
             ><span>{{ job.model }}</span
-            ><span>{{ job.difficultyCount && job.difficultyCount > 1 ? `${job.difficultyCount} difficulties` : `★ ${job.difficulty.toFixed(1)}` }}</span
+            ><span>{{ job.difficultyCount && job.difficultyCount > 1 ? t('jobs.difficultyCount', { count: job.difficultyCount }) : job.difficulty === 0 ? t('jobs.noTargetDifficulty') : `★ ${job.difficulty.toFixed(1)}` }}</span
             ><span>{{ job.createdAt }}</span>
           </div>
           <template v-if="['running', 'validating'].includes(job.status)">

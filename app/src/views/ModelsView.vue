@@ -234,7 +234,13 @@ onMounted(async () => {
           <NTag
             size="small"
             round
-            :type="runtime?.status === 'installed' ? 'success' : runtime?.status === 'failed' ? 'error' : 'default'"
+            :type="
+              runtime?.status === 'installed'
+                ? 'success'
+                : runtime?.status === 'failed'
+                  ? 'error'
+                  : 'default'
+            "
           >
             {{ runtimeStatusLabel(runtime?.status) }}
           </NTag>
@@ -296,14 +302,17 @@ onMounted(async () => {
             round
             :type="environmentStore.diagnostics?.ready ? 'success' : 'warning'"
           >
-            {{ environmentStore.diagnostics?.ready ? t('common.ready') : t('models.setupRequired') }}
+            {{
+              environmentStore.diagnostics?.ready ? t('common.ready') : t('models.setupRequired')
+            }}
           </NTag>
         </div>
         <p class="environment-summary">
           {{ environmentStore.diagnostics?.compatibilityReason ?? t('models.compatibility') }}
         </p>
         <span v-if="environmentStore.diagnostics?.gpuName" class="runtime-path">
-          {{ environmentStore.diagnostics.gpuName }} · Driver {{ environmentStore.diagnostics.driverVersion }}
+          {{ environmentStore.diagnostics.gpuName }} · Driver
+          {{ environmentStore.diagnostics.driverVersion }}
         </span>
       </div>
       <div class="environment-actions">
@@ -319,7 +328,11 @@ onMounted(async () => {
           :disabled="runtime?.status !== 'installed' || environmentStore.installing"
           @click="installDependencies"
         >
-          {{ environmentStore.diagnostics?.ready ? t('models.repairEnvironment') : t('models.installEnvironment') }}
+          {{
+            environmentStore.diagnostics?.ready
+              ? t('models.repairEnvironment')
+              : t('models.installEnvironment')
+          }}
         </NButton>
         <NButton
           secondary
@@ -345,10 +358,34 @@ onMounted(async () => {
         <NTag size="small" round :type="compatibilityTagType">{{ compatibilityTierLabel }}</NTag>
       </div>
       <div class="compatibility-facts">
-        <span>{{ t('models.gpuArchitecture') }} <strong>{{ environmentStore.diagnostics.compatibility.architecture }}</strong></span>
-        <span>{{ t('models.gpuVram') }} <strong>{{ environmentStore.diagnostics.gpuMemoryTotalMb ? `${environmentStore.diagnostics.gpuMemoryTotalMb} MiB` : '—' }}</strong></span>
-        <span>{{ t('models.gpuFreeVram') }} <strong>{{ environmentStore.diagnostics.gpuMemoryFreeMb ? `${environmentStore.diagnostics.gpuMemoryFreeMb} MiB` : '—' }}</strong></span>
-        <span>BF16 <strong>{{ environmentStore.diagnostics.compatibility.bf16Supported ? t('models.nativeSupported') : t('models.fp32Fallback') }}</strong></span>
+        <span
+          >{{ t('models.gpuArchitecture') }}
+          <strong>{{ environmentStore.diagnostics.compatibility.architecture }}</strong></span
+        >
+        <span
+          >{{ t('models.gpuVram') }}
+          <strong>{{
+            environmentStore.diagnostics.gpuMemoryTotalMb
+              ? `${environmentStore.diagnostics.gpuMemoryTotalMb} MiB`
+              : '—'
+          }}</strong></span
+        >
+        <span
+          >{{ t('models.gpuFreeVram') }}
+          <strong>{{
+            environmentStore.diagnostics.gpuMemoryFreeMb
+              ? `${environmentStore.diagnostics.gpuMemoryFreeMb} MiB`
+              : '—'
+          }}</strong></span
+        >
+        <span
+          >BF16
+          <strong>{{
+            environmentStore.diagnostics.compatibility.bf16Supported
+              ? t('models.nativeSupported')
+              : t('models.fp32Fallback')
+          }}</strong></span
+        >
       </div>
       <NAlert
         v-if="environmentStore.diagnostics.compatibility.recommendations.length"
@@ -362,11 +399,14 @@ onMounted(async () => {
       <div v-for="item in diagnosticItems" :key="item.name" class="diagnostic-item">
         <span>{{ item.name }}</span>
         <NTag size="small" round :type="item.installed ? 'success' : 'default'">
-          {{ item.installed ? item.version ?? t('models.installed') : t('models.missing') }}
+          {{ item.installed ? (item.version ?? t('models.installed')) : t('models.missing') }}
         </NTag>
       </div>
     </div>
-    <div v-if="environmentStore.installing && environmentStore.installEvent" class="environment-progress">
+    <div
+      v-if="environmentStore.installing && environmentStore.installEvent"
+      class="environment-progress"
+    >
       <NProgress
         type="line"
         :percentage="environmentStore.installEvent.progress"
@@ -389,7 +429,8 @@ onMounted(async () => {
   <NCard class="storage-banner panel-card" :bordered="false">
     <div class="storage-icon"><NIcon :component="HardwareChipOutline" /></div>
     <div class="storage-copy">
-      <strong>{{ t('models.storage') }}</strong><span>{{ t('models.storageHelp') }}</span
+      <strong>{{ t('models.storage') }}</strong
+      ><span>{{ t('models.storageHelp') }}</span
       ><NProgress
         type="line"
         :percentage="modelStoragePercent"
@@ -410,11 +451,28 @@ onMounted(async () => {
         <div class="model-info">
           <div class="model-name">
             <h2>{{ model.name }}</h2>
-            <NTag v-if="model.recommended" size="small" type="success" round>{{ t('models.recommended') }}</NTag
+            <NTag v-if="model.recommended" size="small" type="success" round>{{
+              t('models.recommended')
+            }}</NTag
             ><NTag size="small" round>v{{ model.targetVersion }}</NTag>
+            <NTag
+              size="small"
+              :type="model.acquisition === 'manual_import' ? 'warning' : 'info'"
+              round
+            >
+              {{
+                model.acquisition === 'manual_import'
+                  ? t('models.manualAcquisition')
+                  : t('models.upstreamAcquisition')
+              }}
+            </NTag>
           </div>
           <p>{{ model.description }}</p>
-          <NAlert v-if="model.id !== 'mapperatorinator-v32-standard'" type="warning" class="import-guidance">
+          <NAlert
+            v-if="model.id !== 'mapperatorinator-v32-standard'"
+            type="warning"
+            class="import-guidance"
+          >
             {{ t('models.generationPending') }}
           </NAlert>
           <NAlert v-if="model.acquisition === 'manual_import'" type="info" class="import-guidance">
@@ -439,9 +497,11 @@ onMounted(async () => {
             v-if="model.acquisition === 'manual_import' && model.sourceUrl"
             secondary
             @click="copyModelSource(model)"
-          >{{ t('models.copySourceUrl') }}</NButton>
+            >{{ t('models.copySourceUrl') }}</NButton
+          >
           <NTag v-if="model.status === 'installed'" type="success" :bordered="false"
-            ><template #icon><NIcon :component="CheckmarkCircleOutline" /></template>{{ t('models.installed') }}</NTag
+            ><template #icon><NIcon :component="CheckmarkCircleOutline" /></template
+            >{{ t('models.installed') }}</NTag
           >
           <NButton
             v-if="model.status !== 'installed'"
@@ -449,17 +509,27 @@ onMounted(async () => {
             secondary
             :loading="modelBusy(model)"
             :disabled="modelBusy(model) || runtime?.status !== 'installed'"
-            @click="model.acquisition === 'manual_import' ? importModel(model) : installModel(model)"
+            @click="
+              model.acquisition === 'manual_import' ? importModel(model) : installModel(model)
+            "
             ><template #icon><NIcon :component="CloudDownloadOutline" /></template>
-            {{ model.acquisition === 'manual_import' ? t('models.importFolder') : model.status === 'update_available' ? t('models.update') : model.status === 'failed' ? t('models.repair') : t('common.install') }}
-          </NButton
-          >
+            {{
+              model.acquisition === 'manual_import'
+                ? t('models.importFolder')
+                : model.status === 'update_available'
+                  ? t('models.update')
+                  : model.status === 'failed'
+                    ? t('models.repair')
+                    : t('common.install')
+            }}
+          </NButton>
           <NButton
             v-if="model.status === 'installed'"
             secondary
             :disabled="modelBusy(model)"
             @click="verifyModel(model)"
-          >{{ t('common.verify') }}</NButton>
+            >{{ t('common.verify') }}</NButton
+          >
           <NButton
             v-if="['installed', 'downloaded', 'failed', 'update_available'].includes(model.status)"
             quaternary

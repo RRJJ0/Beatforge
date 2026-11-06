@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 describe('interface locale', () => {
   beforeEach(() => {
-    localStorage.clear()
+    const values = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      clear: () => values.clear(),
+    })
   })
 
   it('switches translations and updates the document language', async () => {

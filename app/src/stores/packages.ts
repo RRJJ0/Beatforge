@@ -19,6 +19,7 @@ export const usePackagesStore = defineStore('packages', () => {
   const packages = ref<ManagedPackage[]>([])
   const loading = ref(false)
   const error = ref('')
+  let listening = false
 
   const runtimes = computed(() => packages.value.filter((item) => item.kind === 'runtime'))
   const models = computed(() => packages.value.filter((item) => item.kind === 'model'))
@@ -43,11 +44,17 @@ export const usePackagesStore = defineStore('packages', () => {
 
   async function initialize() {
     await refresh()
-    if (!isDesktopRuntime()) return
-    await onPackageProgressEvent((event) => {
-      const item = packages.value.find((candidate) => candidate.id === event.id)
-      if (item) Object.assign(item, event)
-    })
+    if (!isDesktopRuntime() || listening) return
+    listening = true
+    try {
+      await onPackageProgressEvent((event) => {
+        const item = packages.value.find((candidate) => candidate.id === event.id)
+        if (item) Object.assign(item, event)
+      })
+    } catch (reason) {
+      listening = false
+      throw reason
+    }
   }
 
   async function download(packageId: string) {

@@ -115,9 +115,10 @@ const issueCount = computed(
     ).length,
 )
 const averageDifficulty = computed(() => {
-  if (!jobsStore.jobs.length) return '—'
-  const total = jobsStore.jobs.reduce((sum, job) => sum + job.difficulty, 0)
-  return `${(total / jobsStore.jobs.length).toFixed(1)}★`
+  const rated = jobsStore.jobs.filter((job) => job.difficulty > 0)
+  if (!rated.length) return '—'
+  const total = rated.reduce((sum, job) => sum + job.difficulty, 0)
+  return `${(total / rated.length).toFixed(1)}★`
 })
 const hasFilters = computed(
   () =>
@@ -281,7 +282,7 @@ function openPreview(jobId: string) {
               </NTag>
             </div>
             <div>
-              <NTag size="small" round>{{ job.difficultyCount && job.difficultyCount > 1 ? `${job.difficultyCount} difficulties` : `${job.difficulty.toFixed(1)} ★` }}</NTag>
+              <NTag size="small" round>{{ job.difficultyCount && job.difficultyCount > 1 ? t('jobs.difficultyCount', { count: job.difficultyCount }) : job.difficulty === 0 ? t('jobs.noTargetDifficulty') : `${job.difficulty.toFixed(1)} ★` }}</NTag>
               <div v-if="job.provenance?.difficulties?.length" class="difficulty-statuses">
                 <NTag
                   v-for="item in job.provenance.difficulties"
