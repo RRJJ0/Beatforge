@@ -234,10 +234,12 @@ pub fn validate_domain(input: &StartJobInput) -> Result<(), String> {
     if input.gamemode != 0 {
         return Err("The MVP currently supports osu!standard (gamemode 0) only".into());
     }
-    if input.model != packages::STANDARD_MODEL_ID {
-        return Err(
-            "Only the application-managed Mapperatorinator V32 standard model is supported".into(),
-        );
+    if !packages::builtin_manifest()
+        .packages
+        .iter()
+        .any(|package| package.kind == packages::PackageKind::Model && package.id == input.model)
+    {
+        return Err("Unknown or unsupported managed model ID".into());
     }
     let mut ids = std::collections::HashSet::new();
     let mut names = std::collections::HashSet::new();
@@ -359,6 +361,16 @@ pub fn build(
     context: &AdapterContext,
 ) -> Result<ProductionWorkerStartCommand, String> {
     validate_domain(input)?;
+    if input.model != packages::STANDARD_MODEL_ID {
+        return Err("This model's inference adapter is pending 0.3-04".into());
+    }
+    if input
+        .model_version
+        .as_deref()
+        .is_some_and(|version| version != context.model_version)
+    {
+        return Err("Requested model version differs from the resolved managed model".into());
+    }
     if job_id.is_empty()
         || job_id.len() > 128
         || !job_id
@@ -569,6 +581,8 @@ mod tests {
             tags: vec![],
             audio_file: path_string(&audio),
             model: packages::STANDARD_MODEL_ID.into(),
+            model_version: None,
+            model_source: None,
             difficulty: 5.2,
             difficulties: vec![],
             gamemode: 0,
@@ -633,6 +647,28 @@ mod tests {
         let json = serde_json::to_value(command).unwrap();
         assert!(json.get("scenario").is_none());
         assert!(json.get("model").is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn accepts_catalog_ids_but_blocks_new_models_until_their_worker_adapter_exists() {
+        let (root, mut input, context) = fixture();
+        input.model = "mapperatorinator-v30-standard".into();
+        validate_domain(&input).unwrap();
+        assert!(
+            build("BF-v30", &input, &context)
+                .unwrap_err()
+                .contains("0.3-04")
+        );
+        input.model = "user-supplied-checkpoint".into();
+        assert!(validate_domain(&input).unwrap_err().contains("Unknown"));
+        input.model = packages::STANDARD_MODEL_ID.into();
+        input.model_version = Some("32.unrelated".into());
+        assert!(
+            build("BF-wrong-version", &input, &context)
+                .unwrap_err()
+                .contains("version differs")
+        );
         let _ = fs::remove_dir_all(root);
     }
 

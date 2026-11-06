@@ -14,6 +14,8 @@ pub struct JobRecord {
     pub artist: String,
     pub audio_file: String,
     pub model: String,
+    pub model_version: Option<String>,
+    pub model_source: Option<String>,
     pub difficulty: f64,
     pub difficulty_count: usize,
     pub status: String,
@@ -87,6 +89,12 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             [],
         )
         .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (5)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -101,17 +109,40 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
     let output_available = output_path
         .as_deref()
         .is_some_and(|path| Path::new(path).is_file());
-    let difficulty_count = row
+    let saved_input = row
         .get::<_, Option<String>>(15)?
-        .and_then(|value| serde_json::from_str::<StartJobInput>(&value).ok())
+        .and_then(|value| serde_json::from_str::<StartJobInput>(&value).ok());
+    let stored_model: String = row.get(4)?;
+    let model = if stored_model.is_empty() {
+        saved_input
+            .as_ref()
+            .map(|input| input.model.clone())
+            .unwrap_or_default()
+    } else {
+        stored_model
+    };
+    let difficulty_count = saved_input
+        .as_ref()
         .map(|input| input.difficulties.len().max(1))
         .unwrap_or(1);
+    let model_version = saved_input
+        .as_ref()
+        .and_then(|input| input.model_version.clone())
+        .or_else(|| {
+            (model == crate::packages::STANDARD_MODEL_ID)
+                .then(|| crate::packages::LEGACY_V32_VERSION.to_string())
+        });
+    let model_source = saved_input
+        .as_ref()
+        .and_then(|input| input.model_source.clone());
     Ok(JobRecord {
         id: row.get(0)?,
         title: row.get(1)?,
         artist: row.get(2)?,
         audio_file: row.get(3)?,
-        model: row.get(4)?,
+        model,
+        model_version,
+        model_source,
         difficulty: row.get(5)?,
         difficulty_count,
         status: row.get(6)?,
@@ -372,6 +403,8 @@ mod tests {
             tags: vec![],
             audio_file: "C:\\Music\\test.mp3".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
+            model_version: None,
+            model_source: None,
             difficulty: 4.5,
             difficulties: vec![],
             gamemode: 0,
@@ -426,6 +459,7 @@ mod tests {
         .unwrap();
         insert(&connection, "BF-V020", &input).unwrap();
         let saved = get_input(&connection, "BF-V020").unwrap().unwrap();
+        assert_eq!(saved.model_version, None);
         assert_eq!(saved.creator.as_deref(), Some("Human Mapper"));
         assert_eq!(saved.difficulties[0].slider_multiplier, Some(1.6));
         assert_eq!(saved.difficulties[0].hp_drain_rate, Some(6.0));
@@ -453,9 +487,30 @@ mod tests {
         reset_for_retry(&connection, "BF-OLD").unwrap();
         let restored = get_input(&connection, "BF-OLD").unwrap().unwrap();
         assert_eq!(restored.request_schema_version, 1);
+        assert_eq!(
+            get(&connection, "BF-OLD")
+                .unwrap()
+                .unwrap()
+                .model_version
+                .as_deref(),
+            Some(crate::packages::LEGACY_V32_VERSION)
+        );
         assert_eq!(restored.title, "Old");
         assert!(restored.creator.is_none());
         assert!(restored.tags.is_empty());
+
+        let mut selected = saved;
+        selected.model = "mapperatorinator-v30-standard".into();
+        selected.model_version = Some("30.a4c6e6e6".into());
+        selected.model_source = Some("https://huggingface.co/OliBomby/Mapperatorinator-v30/tree/a4c6e6e69c055711c2293d63161c0e52980e56a1".into());
+        insert(&connection, "BF-V030", &selected).unwrap();
+        let stored = get_input(&connection, "BF-V030").unwrap().unwrap();
+        assert_eq!(stored.model, selected.model);
+        assert_eq!(stored.model_version, selected.model_version);
+        assert_eq!(stored.model_source, selected.model_source);
+        let record = get(&connection, "BF-V030").unwrap().unwrap();
+        assert_eq!(record.model_version, selected.model_version);
+        assert_eq!(record.model_source, selected.model_source);
     }
 
     #[test]
@@ -489,6 +544,8 @@ mod tests {
             tags: vec![],
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
+            model_version: None,
+            model_source: None,
             difficulty: 3.0,
             difficulties: vec![],
             gamemode: 0,
@@ -536,6 +593,8 @@ mod tests {
             tags: vec![],
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
+            model_version: None,
+            model_source: None,
             difficulty: 3.0,
             difficulties: vec![],
             gamemode: 0,
@@ -603,6 +662,8 @@ mod tests {
             tags: vec![],
             audio_file: "test.wav".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
+            model_version: None,
+            model_source: None,
             difficulty: 4.0,
             difficulties: vec![],
             gamemode: 0,
@@ -673,6 +734,8 @@ mod tests {
             tags: vec![],
             audio_file: "C:\\Music\\source.flac".into(),
             model: crate::packages::STANDARD_MODEL_ID.into(),
+            model_version: None,
+            model_source: None,
             difficulty: 5.5,
             difficulties: vec![],
             gamemode: 0,

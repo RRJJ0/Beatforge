@@ -51,6 +51,8 @@ fn input(audio: &Path) -> StartJobInput {
         tags: vec![],
         audio_file: audio.to_string_lossy().into_owned(),
         model: crate::packages::STANDARD_MODEL_ID.into(),
+        model_version: None,
+        model_source: None,
         difficulty: 3.5,
         difficulties: vec![
             DifficultyRequest {

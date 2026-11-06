@@ -1,6 +1,6 @@
 use rusqlite::{Connection, OptionalExtension};
 
-pub const CURRENT_DATABASE_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_DATABASE_SCHEMA_VERSION: i64 = 5;
 
 pub fn ensure_supported(connection: &Connection) -> Result<(), String> {
     let has_migrations: Option<i64> = connection
@@ -42,7 +42,7 @@ mod tests {
         empty
             .execute_batch(
                 "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY);
-                 INSERT INTO schema_migrations(version) VALUES (1), (4);",
+                 INSERT INTO schema_migrations(version) VALUES (1), (4), (5);",
             )
             .unwrap();
         ensure_supported(&empty).unwrap();

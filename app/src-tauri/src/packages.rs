@@ -5,6 +5,7 @@ use std::collections::HashSet;
 pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub const PYTHON_RUNTIME_ID: &str = "python-3.10-windows-x64";
 pub const STANDARD_MODEL_ID: &str = "mapperatorinator-v32-standard";
+pub const LEGACY_V32_VERSION: &str = "32.74f22583";
 const MODEL_CATALOG_LOCK: &str =
     include_str!("../resources/manifests/mapperatorinator-model-catalog.lock.json");
 
@@ -145,7 +146,7 @@ pub fn builtin_manifest() -> PackageManifest {
                 kind: PackageKind::Model,
                 name: "Mapperatorinator V32 — osu!standard".into(),
                 description: "Official V32 checkpoint for generating osu!standard beatmaps".into(),
-                version: "32.74f22583".into(),
+                version: LEGACY_V32_VERSION.into(),
                 artifact: PackageArtifact {
                     url: "https://huggingface.co/OliBomby/Mapperatorinator-v32/resolve/74f22583400d259bf424819e11027c17933efe54/gamemode%3D0/model.safetensors".into(),
                     size_bytes: 865_544_236,

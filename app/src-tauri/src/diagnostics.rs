@@ -672,6 +672,8 @@ mod tests {
             tags: vec![],
             audio_file: r"C:\Users\SecretUser\Music\private-song.flac".into(),
             model: packages::STANDARD_MODEL_ID.into(),
+            model_version: None,
+            model_source: None,
             difficulty: 5.0,
             difficulties: vec![],
             gamemode: 0,

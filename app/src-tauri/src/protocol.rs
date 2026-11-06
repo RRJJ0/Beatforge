@@ -51,6 +51,10 @@ pub struct StartJobInput {
     pub tags: Vec<String>,
     pub audio_file: String,
     pub model: String,
+    #[serde(default)]
+    pub model_version: Option<String>,
+    #[serde(default)]
+    pub model_source: Option<String>,
     pub difficulty: f64,
     /// Empty for requests created before multi-difficulty beatmap sets.
     #[serde(default)]

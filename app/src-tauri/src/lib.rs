@@ -1100,6 +1100,150 @@ fn validate_job_input(input: &protocol::StartJobInput) -> Result<(), String> {
     request_adapter::validate_domain(input)
 }
 
+fn pin_job_model(
+    connection: &Connection,
+    paths: &AppPaths,
+    input: &mut protocol::StartJobInput,
+    new_request: bool,
+) -> Result<packages::ManagedPackage, String> {
+    let spec = packages::builtin_manifest()
+        .packages
+        .into_iter()
+        .find(|spec| spec.kind == packages::PackageKind::Model && spec.id == input.model)
+        .ok_or_else(|| "Unknown or unsupported managed model ID".to_string())?;
+    if let Some(saved_version) = &input.model_version {
+        if saved_version != &spec.version {
+            return Err(format!(
+                "Model {} version {} is unavailable; this app supports {}. Install the original version or use a compatible app version",
+                input.model, saved_version, spec.version
+            ));
+        }
+    } else if !new_request
+        && (input.model != packages::STANDARD_MODEL_ID
+            || spec.version != packages::LEGACY_V32_VERSION)
+    {
+        return Err(
+            "Saved job has no pinned model version; cannot substitute another model".into(),
+        );
+    }
+    let package = packages::get(connection, &input.model)?
+        .ok_or_else(|| format!("Model {} is not in the managed catalog", input.model))?;
+    let source = package
+        .source_url
+        .as_deref()
+        .ok_or_else(|| "Managed model source is unavailable".to_string())?;
+    if let Some(saved_source) = &input.model_source {
+        if saved_source != source {
+            return Err("Saved job model source differs from the pinned catalog source".into());
+        }
+    } else if !new_request && input.model != packages::STANDARD_MODEL_ID {
+        return Err("Saved job has no pinned model source".into());
+    }
+    if package.status != packages::PackageStatus::Installed
+        || package.installed_version.as_deref() != Some(spec.version.as_str())
+    {
+        return Err(format!(
+            "Model {} version {} is not installed. Install or import that exact model before generating, retrying, or regenerating",
+            input.model, spec.version
+        ));
+    }
+    let installed_path = PathBuf::from(
+        package
+            .install_path
+            .as_deref()
+            .ok_or_else(|| "Installed model has no managed path".to_string())?,
+    );
+    let root = Path::new(&paths.models)
+        .canonicalize()
+        .map_err(|error| format!("Cannot resolve managed model root: {error}"))?;
+    let actual = installed_path
+        .canonicalize()
+        .map_err(|error| format!("Installed model path is unavailable: {error}"))?;
+    let expected = root
+        .join(&spec.id)
+        .join(&spec.version)
+        .canonicalize()
+        .map_err(|error| format!("Pinned model path is unavailable: {error}"))?;
+    if !actual.starts_with(&root) || actual != expected {
+        return Err("Installed model path is outside the pinned managed package".into());
+    }
+    models::verify_model(&actual, &spec)
+        .map_err(|error| format!("Model {} failed verification: {error}", input.model))?;
+    input.model_version = Some(spec.version);
+    input.model_source = Some(source.to_string());
+    Ok(package)
+}
+
+#[cfg(test)]
+mod model_selection_tests {
+    use super::*;
+
+    #[test]
+    fn refuses_unknown_changed_or_missing_models_without_substitution() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY);")
+            .unwrap();
+        packages::migrate(&connection).unwrap();
+        packages::sync_manifest(&connection, &packages::builtin_manifest()).unwrap();
+        let paths = AppPaths {
+            root: String::new(),
+            models: String::new(),
+            runtime: String::new(),
+            cache: String::new(),
+            logs: String::new(),
+            jobs: String::new(),
+            outputs: String::new(),
+            database: String::new(),
+        };
+        let mut input: protocol::StartJobInput = serde_json::from_value(serde_json::json!({
+            "title": "Song", "artist": "Artist", "audioFile": "song.wav",
+            "model": "untrusted-model", "difficulty": 4.5
+        }))
+        .unwrap();
+        assert!(
+            pin_job_model(&connection, &paths, &mut input, true)
+                .unwrap_err()
+                .contains("Unknown")
+        );
+
+        input.model = "mapperatorinator-v30-standard".into();
+        assert!(
+            pin_job_model(&connection, &paths, &mut input, false)
+                .unwrap_err()
+                .contains("no pinned model version")
+        );
+        input.model_version = Some("30.older".into());
+        assert!(
+            pin_job_model(&connection, &paths, &mut input, false)
+                .unwrap_err()
+                .contains("unavailable")
+        );
+        input.model_version = Some("30.a4c6e6e6".into());
+        input.model_source = Some("https://example.test/other-weights".into());
+        assert!(
+            pin_job_model(&connection, &paths, &mut input, false)
+                .unwrap_err()
+                .contains("source differs")
+        );
+        input.model_source = Some("https://huggingface.co/OliBomby/Mapperatorinator-v30/tree/a4c6e6e69c055711c2293d63161c0e52980e56a1".into());
+        assert!(
+            pin_job_model(&connection, &paths, &mut input, false)
+                .unwrap_err()
+                .contains("not installed")
+        );
+
+        input.model = packages::STANDARD_MODEL_ID.into();
+        input.model_version = None;
+        input.model_source = None;
+        assert!(
+            pin_job_model(&connection, &paths, &mut input, false)
+                .unwrap_err()
+                .contains("not installed")
+        );
+    }
+}
+
 fn build_production_request(
     app: &AppHandle,
     job_id: &str,
@@ -1107,11 +1251,8 @@ fn build_production_request(
 ) -> Result<request_adapter::ProductionWorkerStartCommand, String> {
     let settings = load_settings_value(app)?;
     let (connection, paths) = open_database(app)?;
-    let model = packages::get(&connection, packages::STANDARD_MODEL_ID)?
-        .ok_or_else(|| "Managed V32 model package is unavailable".to_string())?;
-    if model.status != packages::PackageStatus::Installed {
-        return Err("Install the managed V32 standard model before generating".into());
-    }
+    let mut pinned_input = input.clone();
+    let model = pin_job_model(&connection, &paths, &mut pinned_input, false)?;
     let model_path = model
         .install_path
         .as_deref()
@@ -1139,25 +1280,32 @@ fn build_production_request(
         gpu_memory_total_mb: gpu.memory_total_mb,
         driver_version: gpu.driver_version,
     };
-    request_adapter::build(job_id, input, &context)
+    request_adapter::build(job_id, &pinned_input, &context)
 }
 
 #[tauri::command]
 fn create_job(
     app: AppHandle,
     manager: tauri::State<'_, worker::WorkerManager>,
-    input: protocol::StartJobInput,
+    mut input: protocol::StartJobInput,
 ) -> Result<jobs::JobRecord, String> {
     validate_job_input(&input)?;
+    let (connection, paths) = open_database(&app)?;
+    pin_job_model(&connection, &paths, &mut input, true)?;
+    if input.scenario == "success" && input.model != packages::STANDARD_MODEL_ID {
+        return Err("This model's inference adapter is pending 0.3-04".into());
+    }
     let settings = load_settings_value(&app)?;
     if settings.device == "cuda" {
         let gpu = detect_gpu();
         gpu_compatibility::cuda_preflight(gpu_facts(&gpu))?;
     }
     let id = next_job_id();
-    let (connection, _) = open_database(&app)?;
     let record = jobs::insert(&connection, &id, &input)?;
-    manager.enqueue(id, input)?;
+    if let Err(error) = manager.enqueue(id.clone(), input) {
+        let _ = jobs::rollback_queued_insert(&connection, &id);
+        return Err(format!("Could not queue the job: {error}"));
+    }
     Ok(record)
 }
 
@@ -1993,8 +2141,8 @@ fn retry_job(
     manager: tauri::State<'_, worker::WorkerManager>,
     job_id: String,
 ) -> Result<(), String> {
-    let (connection, _) = open_database(&app)?;
-    let input =
+    let (connection, paths) = open_database(&app)?;
+    let mut input =
         jobs::get_input(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
     let job = jobs::get(&connection, &job_id)?.ok_or_else(|| "Job was not found".to_string())?;
     if !matches!(
@@ -2002,6 +2150,11 @@ fn retry_job(
         "failed" | "validation_failed" | "cancelled" | "interrupted"
     ) {
         return Err("Only a failed, cancelled, or interrupted job can be retried".into());
+    }
+    validate_job_input(&input)?;
+    pin_job_model(&connection, &paths, &mut input, false)?;
+    if input.scenario == "success" && input.model != packages::STANDARD_MODEL_ID {
+        return Err("This model's inference adapter is pending 0.3-04".into());
     }
     worker::cleanup_job_artifacts(&app, &job_id)?;
     jobs::reset_for_retry(&connection, &job_id)?;
@@ -2014,17 +2167,23 @@ fn regenerate_job(
     manager: tauri::State<'_, worker::WorkerManager>,
     job_id: String,
 ) -> Result<jobs::JobRecord, String> {
-    let (connection, _) = open_database(&app)?;
+    let (connection, paths) = open_database(&app)?;
     let source = jobs::get(&connection, &job_id)?
         .ok_or_else(|| "The source job was not found".to_string())?;
     if matches!(source.status.as_str(), "running" | "queued" | "validating") {
         return Err("An active job cannot be regenerated".into());
     }
-    let input = jobs::get_input(&connection, &job_id)?
+    let mut input = jobs::get_input(&connection, &job_id)?
         .ok_or_else(|| "The source job request is unavailable".to_string())?;
     validate_job_input(&input).map_err(|error| {
         format!("The source job cannot be regenerated with its saved inputs: {error}")
     })?;
+    pin_job_model(&connection, &paths, &mut input, false).map_err(|error| {
+        format!("The source job cannot be regenerated with its original model: {error}")
+    })?;
+    if input.scenario == "success" && input.model != packages::STANDARD_MODEL_ID {
+        return Err("This model's inference adapter is pending 0.3-04".into());
+    }
 
     let new_id = next_job_id();
     let record = jobs::insert(&connection, &new_id, &input)?;

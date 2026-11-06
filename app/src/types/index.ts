@@ -116,6 +116,8 @@ export interface GenerationJob {
   artist: string
   audioFile: string
   model: string
+  modelVersion?: string | null
+  modelSource?: string | null
   difficulty: number
   difficultyCount?: number
   status: JobStatus
@@ -158,6 +160,8 @@ export interface StartJobInput {
   tags?: string[]
   audioFile: string
   model: string
+  modelVersion?: string | null
+  modelSource?: string | null
   difficulty: number
   difficulties?: DifficultyRequest[]
   gamemode: number
